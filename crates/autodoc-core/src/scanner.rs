@@ -46,11 +46,8 @@ impl RepositoryScanner {
                 let path = entry.path();
                 // Filter out non-code or known noisy binaries
                 if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
-                    match ext {
-                        "rs" | "ts" | "js" | "py" | "java" | "c" | "cpp" | "h" | "hpp" | "cs" | "go" | "php" | "rb" | "sql" => {
-                            candidate_files.push(path.to_path_buf());
-                        }
-                        _ => {}
+                    if matches!(ext, "rs" | "ts" | "js" | "py" | "java" | "c" | "cpp" | "h" | "hpp" | "cs" | "go" | "php" | "rb" | "sql") {
+                        candidate_files.push(path.to_path_buf());
                     }
                 }
             }

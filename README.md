@@ -184,6 +184,7 @@ Comprehensive documentation adhering to the **Diátaxis Framework** is available
   - [Functions & Symbol Catalog](docs/reference/functions-reference.md)
   - [MCP Tools Specification](docs/reference/tools.md)
   - [System Architecture Specification](docs/reference/architecture.md)
+  - [Security Audit & Hardening Report](docs/reference/security-audit-report.md)
   - [Self-Mapped Codebase Topology (C1-C4)](docs/reference/codebase-map.md)
   - [Open-Source Licensing and Compliance](docs/reference/licensing.md)
 - **Explanation**:

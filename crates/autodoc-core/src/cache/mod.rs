@@ -200,6 +200,7 @@ impl StorageEngine {
         Ok(file_id)
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn write_symbol(
         conn: &mut Connection,
         file_id: i64,
@@ -278,6 +279,7 @@ impl StorageEngine {
         rx.recv().map_err(|e| AutoDocError::Internal(e.to_string()))?
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn insert_symbol(
         &self,
         file_id: i64,

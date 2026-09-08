@@ -79,7 +79,7 @@ impl GraphEngine {
             .collect();
 
         // Sort descending by connectivity
-        scores.sort_by(|a, b| b.1.cmp(&a.1));
+        scores.sort_by_key(|a| std::cmp::Reverse(a.1));
 
         let limit = max_nodes.clamp(10, 100).min(scores.len());
         let top_nodes: Vec<u32> = scores.iter().take(limit).map(|(n, _)| *n).collect();

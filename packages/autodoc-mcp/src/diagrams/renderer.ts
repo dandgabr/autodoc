@@ -32,7 +32,10 @@ export class DiagramRenderer {
       .replace(/"/g, "&quot;")
       .replace(/'/g, "&#39;")
       .replace(/javascript:/gi, "[blocked-uri]:")
-      .replace(/onerror/gi, "[blocked-attr]");
+      .replace(/onerror/gi, "[blocked-attr]")
+      .replace(/onload/gi, "[blocked-attr]")
+      .replace(/onclick/gi, "[blocked-attr]")
+      .replace(/onfocus/gi, "[blocked-attr]");
   }
 
   static escapeMermaidLabel(text: string): string {

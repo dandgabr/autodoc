@@ -1,6 +1,6 @@
-/// Semantic framing defensive shield against indirect prompt injection (OWASP LLM01).
-/// Wraps untrusted third-party code, docstrings, and comments in structured delimiter tags
-/// and escapes model control tokens.
+//! Semantic framing defensive shield against indirect prompt injection (OWASP LLM01).
+//! Wraps untrusted third-party code, docstrings, and comments in structured delimiter tags
+//! and escapes model control tokens.
 
 pub fn wrap_untrusted_code(content: &str, origin: &str, file: &str, symbol: &str) -> String {
     // 1. Escape any premature closing tags that an adversary might inject

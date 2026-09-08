@@ -1,4 +1,4 @@
-/// Checksum validation implementations for regional & domain-specific identifiers.
+//! Checksum validation implementations for regional & domain-specific identifiers.
 
 /// Validates Brazilian CPF via Modulo 11
 pub fn validate_cpf(digits_only: &str) -> bool {
@@ -132,7 +132,7 @@ pub fn validate_cns(digits_only: &str) -> bool {
             return false;
         }
         let sum: u32 = digits.iter().enumerate().map(|(i, &d)| d * (15 - i as u32)).sum();
-        sum % 11 == 0
+        sum.is_multiple_of(11)
     } else {
         false
     }
