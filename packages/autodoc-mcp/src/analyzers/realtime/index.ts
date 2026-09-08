@@ -118,7 +118,7 @@ export class RealtimeAnalyzer {
   }
 
   private extractModuleDeclaredSocketEvents(content: string, relPath: string, out: Map<string, DiscoveredSocketEvent>) {
-    // Look for socketEvents: ["roulette:join", "roulette:leave", ...]
+    // Look for socketEvents: ["module:join", "module:leave", ...]
     const socketEventsRegex = /socketEvents\s*:\s*\[([^\]]+)\]/g;
     let match;
     while ((match = socketEventsRegex.exec(content)) !== null) {

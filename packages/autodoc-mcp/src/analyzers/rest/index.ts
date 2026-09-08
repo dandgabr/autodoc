@@ -188,7 +188,7 @@ export class RestAnalyzer {
         }
       }
 
-      // 2. Module registry objects: routers: [{ path: '/api/bombeta', router: bombetaRouter }]
+      // 2. Module registry objects: routers: [{ path: '/api/module', router: moduleRouter }]
       const moduleRouterRegex = /path:\s*['"`]([^'"`]+)['"`]\s*,\s*router:\s*([a-zA-Z0-9_]+)/g;
       while ((match = moduleRouterRegex.exec(content)) !== null) {
         const prefix = match[1];

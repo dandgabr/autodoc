@@ -1,4 +1,5 @@
 import { describe, it, expect } from "vitest";
+import { existsSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { WorkspaceAnalyzer } from "../src/analyzers/workspace.js";
 import { ContainerInfraAnalyzer } from "../src/analyzers/containers.js";
@@ -8,12 +9,17 @@ import { SchemaAnalyzer } from "../src/analyzers/schema/index.js";
 import { ArchitectureAnalyzer } from "../src/analyzers/architecture.js";
 import { DiataxisGenerator } from "../src/diataxis/generator.js";
 
-describe("Agnostic Discovery Engines (Workspace, Containers, REST, Realtime, Schema, Diataxis)", () => {
-  const butecoPath = "/home/daniel/Code/butecogames";
-  const autodocPath = "/home/daniel/Code/autodoc";
+// Benchmark repository used as a rich multi-module test fixture. Skipped
+// automatically when the external repo is not present, so the suite stays
+// portable across hosts and CI.
+const BENCHMARK_REPO = process.env.AUTODOC_BENCHMARK_REPO || "/home/daniel/Code/butecogames";
+const benchmarkAvailable = existsSync(BENCHMARK_REPO) && statSync(BENCHMARK_REPO).isDirectory();
+const describeBenchmark = benchmarkAvailable ? describe : describe.skip;
+
+describeBenchmark("Agnostic Discovery Engines vs benchmark monorepo (Workspace, Containers, REST, Realtime, Schema, Diataxis)", () => {
 
   it("should analyze workspace structure and package manager accurately", () => {
-    const analyzer = new WorkspaceAnalyzer(butecoPath);
+    const analyzer = new WorkspaceAnalyzer(BENCHMARK_REPO);
     const info = analyzer.analyze();
 
     expect(info.isMonorepo).toBe(true);
@@ -31,7 +37,7 @@ describe("Agnostic Discovery Engines (Workspace, Containers, REST, Realtime, Sch
   });
 
   it("should analyze container infrastructure agnostically", () => {
-    const analyzer = new ContainerInfraAnalyzer(butecoPath);
+    const analyzer = new ContainerInfraAnalyzer(BENCHMARK_REPO);
     const report = analyzer.analyze();
 
     expect(report.detectedPatterns).toContain("docker-compose");
@@ -47,7 +53,7 @@ describe("Agnostic Discovery Engines (Workspace, Containers, REST, Realtime, Sch
   });
 
   it("should discover modular REST endpoints with mounted prefixes", () => {
-    const analyzer = new RestAnalyzer(butecoPath);
+    const analyzer = new RestAnalyzer(BENCHMARK_REPO);
     const endpoints = analyzer.discoverEndpoints("ALL", 200);
 
     expect(endpoints.length).toBeGreaterThan(50);
@@ -73,7 +79,7 @@ describe("Agnostic Discovery Engines (Workspace, Containers, REST, Realtime, Sch
   });
 
   it("should discover realtime contracts across room runtime and game modules", () => {
-    const analyzer = new RealtimeAnalyzer(butecoPath);
+    const analyzer = new RealtimeAnalyzer(BENCHMARK_REPO);
     const events = analyzer.discoverSocketContracts("ALL", 250);
 
     expect(events.length).toBeGreaterThan(80);
@@ -97,7 +103,7 @@ describe("Agnostic Discovery Engines (Workspace, Containers, REST, Realtime, Sch
   });
 
   it("should discover polymorphic data models and discriminators", () => {
-    const analyzer = new SchemaAnalyzer(butecoPath);
+    const analyzer = new SchemaAnalyzer(BENCHMARK_REPO);
     const models = analyzer.discoverModels(100);
 
     expect(models.length).toBeGreaterThan(25);
@@ -126,7 +132,7 @@ describe("Agnostic Discovery Engines (Workspace, Containers, REST, Realtime, Sch
   });
 
   it("should generate semantic C4 diagrams with real infrastructure nodes", () => {
-    const analyzer = new ArchitectureAnalyzer(butecoPath);
+    const analyzer = new ArchitectureAnalyzer(BENCHMARK_REPO);
 
     const level1 = analyzer.getArchitectureGraph(1);
     expect(level1.nodes.some((n) => n.id === "DiscordAuthExt")).toBe(true);
@@ -147,7 +153,7 @@ describe("Agnostic Discovery Engines (Workspace, Containers, REST, Realtime, Sch
   });
 
   it("should synthesize complete Diataxis living documentation structure", () => {
-    const generator = new DiataxisGenerator(butecoPath);
+    const generator = new DiataxisGenerator(BENCHMARK_REPO);
     const docs = generator.synthesizeFullDocumentation();
 
     expect(docs.length).toBeGreaterThanOrEqual(20);
@@ -172,7 +178,7 @@ describe("Agnostic Discovery Engines (Workspace, Containers, REST, Realtime, Sch
 
   it("should exclude test suite noise by default and include when requested", () => {
     // 1. RealtimeAnalyzer: channels.test.ts defines dummy channels room:abc and room:abc:spectators
-    const productionRealtime = new RealtimeAnalyzer(butecoPath, { includeTests: false });
+    const productionRealtime = new RealtimeAnalyzer(BENCHMARK_REPO, { includeTests: false });
     const prodEvents = productionRealtime.discoverSocketContracts("ALL", 500);
 
     const hasTestDummyRoom = prodEvents.some(
@@ -180,7 +186,7 @@ describe("Agnostic Discovery Engines (Workspace, Containers, REST, Realtime, Sch
     );
     expect(hasTestDummyRoom).toBe(false);
 
-    const testInclusiveRealtime = new RealtimeAnalyzer(butecoPath, { includeTests: true });
+    const testInclusiveRealtime = new RealtimeAnalyzer(BENCHMARK_REPO, { includeTests: true });
     const allEvents = testInclusiveRealtime.discoverSocketContracts("ALL", 500);
     const hasTestDummyRoomInInclusive = allEvents.some(
       (e) => e.eventName === "room:abc" || e.eventName === "room:abc:spectators"
@@ -188,7 +194,7 @@ describe("Agnostic Discovery Engines (Workspace, Containers, REST, Realtime, Sch
     expect(hasTestDummyRoomInInclusive).toBe(true);
 
     // 2. RestAnalyzer: should exclude test files by default
-    const prodRest = new RestAnalyzer(butecoPath, { includeTests: false });
+    const prodRest = new RestAnalyzer(BENCHMARK_REPO, { includeTests: false });
     const prodEndpoints = prodRest.discoverEndpoints("ALL", 500);
     const hasTestEndpoint = prodEndpoints.some(
       (e) => e.sourceFile?.includes(".test.") || e.sourceFile?.includes(".spec.")

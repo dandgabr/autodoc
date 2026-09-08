@@ -52,7 +52,7 @@ export class HonestyAnalyzer {
       if (!imperativeNames.has(typed.eventName) && typed.eventName !== "connection") {
         // Evaluate heuristic confidence:
         // - low: dynamic prefix (e.g. room:*, event:*, sfu:*, rtc:*, screenshare:*) or generic keywords
-        // - medium: game/submodule prefix (e.g. bombeta:*, roulette:*) where handlers might be registered via dynamic dispatch
+        // - medium: feature/submodule prefix (e.g. module:* events) where handlers might be registered via dynamic dispatch
         // - high: specific static single-word or fully isolated event name
         let confidence: "high" | "medium" | "low" = "high";
         if (

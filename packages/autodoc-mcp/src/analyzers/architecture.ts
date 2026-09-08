@@ -127,7 +127,7 @@ export class ArchitectureAnalyzer {
       {
         id: "UserActor",
         label: "End User / Player",
-        desc: "Interacts with games, rooms, and platform through responsive web client",
+        desc: "Interacts with the platform through the responsive web client",
         type: "person",
       },
       {
@@ -282,7 +282,7 @@ export class ArchitectureAnalyzer {
       nodes.push({
         id: "ClientApp",
         label: "Web Client SPA",
-        desc: "Responsive Single Page Application providing interactive gaming lobbies, canvas, and audio/video controls",
+        desc: "Responsive Single Page Application providing interactive user lobbies, canvas, and audio/video controls",
         type: "container",
         technology: "React 19 / TypeScript / Vite / TailwindCSS",
       });
@@ -298,8 +298,8 @@ export class ArchitectureAnalyzer {
     if (hasServerPkg || !hasClientPkg) {
       nodes.push({
         id: "ApiGateway",
-        label: "Game & API Server",
-        desc: "Monolithic modular server hosting REST endpoints, Shared Room Runtime, and pluggable game event loops",
+        label: "Application & API Server",
+        desc: "Modular server hosting REST endpoints, realtime runtimes, and pluggable event loops",
         type: "container",
         technology: "Node.js 22 / Express / Socket.io / Better Auth",
       });
@@ -509,45 +509,45 @@ export class ArchitectureAnalyzer {
       nodes.push(
         {
           id: "RoomManagerComp",
-          label: "Shared Room Runtime",
-          desc: "Orchestrates multi-player room lifecycles, seats, ready states, and match persistence",
+          label: "Realtime Room Runtime",
+          desc: "Orchestrates multi-user room lifecycles, seats, ready states, and session persistence",
           type: "component",
           technology: "TypeScript / Socket.io",
         },
         {
           id: "ModuleRegistryComp",
           label: "Server Module Registry",
-          desc: "Dynamic plugin registry mounting 15 game modules, routers, models, and jobs",
+          desc: "Dynamic plugin registry mounting feature modules, routers, models, and jobs",
           type: "component",
           technology: "TypeScript / Core Registry",
         },
         {
           id: "WalletAuthComp",
-          label: "Auth & Wallet Service",
-          desc: "Validates Discord OAuth2 sessions and atomic ledger currency transactions",
+          label: "Auth & Transaction Service",
+          desc: "Validates user sessions and processes transactional domain operations",
           type: "component",
           technology: "TypeScript / Better Auth / Mongoose",
         },
         {
           id: "MediaSfuComp",
           label: "Media & SFU Service",
-          desc: "Manages audio/video sessions via Cloudflare Calls and user-shared uploads",
+          desc: "Manages audio/video sessions via SFU providers and user-shared uploads",
           type: "component",
           technology: "TypeScript / WebRTC WHEP / R2",
         },
         {
-          id: "GameEnginesComp",
-          label: "Pluggable Game Engines",
-          desc: "Executes authoritative game state machines (Roulette, Bombeta, Uneco, Card Duel)",
+          id: "DomainEnginesComp",
+          label: "Pluggable Domain Engines",
+          desc: "Executes authoritative domain state machines for registered feature modules",
           type: "component",
           technology: "TypeScript / State Machines",
         }
       );
 
       edges.push(
-        { from: "RoomManagerComp", to: "GameEnginesComp", label: "delegates match loop", technology: "In-memory" },
+        { from: "RoomManagerComp", to: "DomainEnginesComp", label: "delegates session loop", technology: "In-memory" },
         { from: "ModuleRegistryComp", to: "RoomManagerComp", label: "registers room specs", technology: "In-memory" },
-        { from: "GameEnginesComp", to: "WalletAuthComp", label: "transacts bet payouts", technology: "Internal Call" },
+        { from: "DomainEnginesComp", to: "WalletAuthComp", label: "executes domain transactions", technology: "Internal Call" },
         { from: "RoomManagerComp", to: "MediaSfuComp", label: "binds SFU tracks to room", technology: "Internal Call" }
       );
     }
