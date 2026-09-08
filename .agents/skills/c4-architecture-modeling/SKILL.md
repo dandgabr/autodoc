@@ -19,7 +19,8 @@ This skill defines the technical standards for visual software architecture docu
 2. **Level 2: Containers (`C4Container`)**:
    - Focus: Separately deployable executable units (APIs, workers, web applications, databases, file stores).
 3. **Level 3: Components (`C4Component`)**:
-   - Focus: Modular groupings within a single container (controllers, repositories, services, managers).
+   - Focus: Modular groupings within a single container (controllers, repositories, services, analyzers).
+   - AutoDoc dynamically derives Level 3 components directly from SQLite WAL `symbols` and `edges`, weighting high cyclomatic complexity ($CC$) modules and rendering actual internal call relationships.
 4. **Level 4: Code (`C4Code` / Class Diagrams)**:
    - Focus: In-depth code relationships, interfaces, and design patterns.
 

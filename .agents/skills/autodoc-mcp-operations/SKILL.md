@@ -1,6 +1,6 @@
 ---
 name: autodoc-mcp-operations
-description: Operates the local AutoDoc MCP Server tools, handling repository scanning, C4 diagram generation, symbol contract extraction, taint data flow tracing, API inventory, and cache management.
+description: Operates the local AutoDoc MCP Server tools, handling repository scanning, C4 diagram generation, symbol contract extraction, taint data flow tracing, API and socket inventory, Diátaxis living documentation export, and cache management.
 metadata:
   type: operations
   phase: execution
@@ -10,7 +10,7 @@ metadata:
 
 # AutoDoc MCP Operations Skill
 
-This skill equips agents with operational procedures to execute the seven core Model Context Protocol (MCP) tools provided by AutoDoc (`@autodoc/mcp`).
+This skill equips agents with operational procedures to execute the nine core Model Context Protocol (MCP) tools provided by AutoDoc (`@autodoc/mcp`).
 
 ---
 
@@ -56,6 +56,21 @@ Inventories service endpoints spanning enterprise protocols.
 - **Parameters**:
   - `protocolFilter` ("ALL" | "REST" | "SOAP" | "GRPC" | "GRAPHQL" | "CORBA"): Protocol selector.
   - `limit` (number): Pagination ceiling (default: 50).
+
+### `autodoc_list_socket_contracts`
+Inventories realtime WebSocket, Socket.io, and WebRTC signaling contracts across server and client code.
+- **When to use**: Mapping realtime event-driven architectures, WebSocket handlers, and WebRTC peer negotiation flows.
+- **Parameters**:
+  - `directionFilter` ("ALL" | "CLIENT_TO_SERVER" | "SERVER_TO_CLIENT" | "BIDIRECTIONAL"): Event direction filter.
+  - `limit` (number): Pagination ceiling (default: 50).
+  - `cursor` (string): Pagination cursor.
+
+### `autodoc_export_documentation`
+Synthesizes living technical documentation structured across Tutorials, How-To, Reference, and Architecture quadrants directly from the SQLite graph.
+- **When to use**: Generating full project documentation, updating READMEs, or publishing developer portals.
+- **Parameters**:
+  - `outputDir` (string): Target filesystem directory (default: `"./docs"`).
+  - `includeSourceRef` (boolean): Include source code file and line references (default: `true`).
 
 ### `autodoc_generate_adr`
 Produces an Architectural Decision Record in Markdown format following the MADR structure.
