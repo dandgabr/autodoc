@@ -19,6 +19,8 @@ export interface NativeBinding {
   initLogger(): void;
   ping(traceId: string): PingResponse;
   triggerPanicTest(reason: string): string;
+  sanitizeContent?(content: string): { sanitizedText: string; redactionCount: number };
+  wrapUntrusted?(content: string, origin: string, file: string, symbol: string): string;
 }
 
 /**

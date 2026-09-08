@@ -1,0 +1,22 @@
+{
+  "c4": {
+    "system_context": "System Context",
+    "containers": "Container Diagram",
+    "components": "Component Diagram",
+    "code": "Code Diagram",
+    "auxiliary": "+ {count} Auxiliary Components",
+    "legend": "Legend: System Boundaries and Integration Contracts"
+  },
+  "tools": {
+    "scan_completed": "Repository scanned successfully",
+    "c4_generated": "C4 diagram generated",
+    "cache_purged": "Local cache purged and vacuumed"
+  },
+  "adr": {
+    "title": "Architectural Decision Record",
+    "status": "Status",
+    "context": "Context",
+    "decision": "Decision",
+    "consequences": "Consequences"
+  }
+}

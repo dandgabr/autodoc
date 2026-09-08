@@ -1,0 +1,22 @@
+{
+  "c4": {
+    "system_context": "Contexto do Sistema",
+    "containers": "Diagrama de Containers",
+    "components": "Diagrama de Componentes",
+    "code": "Diagrama de Código",
+    "auxiliary": "+ {count} Componentes Auxiliares",
+    "legend": "Legenda: Limites do Sistema e Contratos de Integração"
+  },
+  "tools": {
+    "scan_completed": "Varredura do repositório concluída com sucesso",
+    "c4_generated": "Diagrama C4 gerado",
+    "cache_purged": "Cache local expurgado e otimizado"
+  },
+  "adr": {
+    "title": "Registro de Decisão Arquitetural",
+    "status": "Status",
+    "context": "Contexto",
+    "decision": "Decisão",
+    "consequences": "Consequências"
+  }
+}
