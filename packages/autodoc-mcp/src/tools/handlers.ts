@@ -56,6 +56,8 @@ export const ListApiContractsSchema = z.object({
   protocol_filter: z.enum(["ALL", "REST", "SOAP", "GRPC", "GRAPHQL", "CORBA"]).optional(),
   limit: z.number().int().min(1).max(100).default(50),
   cursor: z.string().optional(),
+  includeTests: z.boolean().default(false),
+  include_tests: z.boolean().optional(),
 });
 
 export const ListSocketContractsSchema = z.object({
@@ -64,6 +66,8 @@ export const ListSocketContractsSchema = z.object({
   directionFilter: z.string().optional(),
   direction_filter: z.enum(["ALL", "CLIENT_TO_SERVER", "SERVER_TO_CLIENT", "BIDIRECTIONAL"]).optional(),
   limit: z.number().int().min(1).max(100).default(50),
+  includeTests: z.boolean().default(false),
+  include_tests: z.boolean().optional(),
 });
 
 export const ExportDocumentationSchema = z.object({
@@ -71,6 +75,8 @@ export const ExportDocumentationSchema = z.object({
   repository_path: z.string().optional(),
   outputDir: z.string().default("./docs"),
   output_dir: z.string().optional(),
+  includeTests: z.boolean().default(false),
+  include_tests: z.boolean().optional(),
 });
 
 export const GenerateAdrSchema = z.object({
@@ -292,7 +298,8 @@ export class AutoDocTools {
 
   async handleListApiContracts(args: z.infer<typeof ListApiContractsSchema>) {
     const targetRepo = this.resolveTargetRepo(args);
-    const analyzer = new RestAnalyzer(targetRepo);
+    const includeTests = args.include_tests ?? args.includeTests ?? false;
+    const analyzer = new RestAnalyzer(targetRepo, { includeTests });
     const filter = args.protocolFilter || args.protocol_filter || "ALL";
     const contracts = analyzer.discoverEndpoints(filter, args.limit);
 
@@ -306,7 +313,8 @@ export class AutoDocTools {
 
   async handleListSocketContracts(args: z.infer<typeof ListSocketContractsSchema>) {
     const targetRepo = this.resolveTargetRepo(args);
-    const analyzer = new RealtimeAnalyzer(targetRepo);
+    const includeTests = args.include_tests ?? args.includeTests ?? false;
+    const analyzer = new RealtimeAnalyzer(targetRepo, { includeTests });
     const filter = args.directionFilter || args.direction_filter || "ALL";
     const contracts = analyzer.discoverSocketContracts(filter, args.limit);
 
@@ -321,7 +329,8 @@ export class AutoDocTools {
   async handleExportDocumentation(args: z.infer<typeof ExportDocumentationSchema>) {
     const targetRepo = this.resolveTargetRepo(args);
     const targetDir = args.output_dir || args.outputDir || join(targetRepo, "docs");
-    const generator = new DiataxisGenerator(targetRepo);
+    const includeTests = args.include_tests ?? args.includeTests ?? false;
+    const generator = new DiataxisGenerator(targetRepo, { includeTests });
     const result = generator.exportToDirectory(targetDir);
 
     return {

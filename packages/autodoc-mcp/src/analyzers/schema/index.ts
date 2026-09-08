@@ -1,5 +1,6 @@
 import { readFileSync, readdirSync, statSync, existsSync } from "node:fs";
 import { join, extname, basename } from "node:path";
+import { isIgnoredDirectory, isTestPath } from "../utils.js";
 
 export interface DataField {
   name: string;
@@ -28,6 +29,8 @@ export interface DataModelContract {
   isDiscriminator?: boolean;
   baseModel?: string;
   discriminatorKey?: string;
+  isSubdocument?: boolean;
+  parentModel?: string;
 }
 
 export interface DomainRuleContract {
@@ -37,16 +40,23 @@ export interface DomainRuleContract {
   sourceFile: string;
 }
 
+export interface SchemaAnalyzerOptions {
+  includeTests?: boolean;
+}
+
 export class SchemaAnalyzer {
   private repoPath: string;
+  private includeTests: boolean;
 
-  constructor(repoPath: string = process.cwd()) {
+  constructor(repoPath: string = process.cwd(), options: SchemaAnalyzerOptions = {}) {
     this.repoPath = repoPath;
+    this.includeTests = options.includeTests ?? false;
   }
 
-  public discoverModels(limit: number = 100): DataModelContract[] {
+  public discoverModels(limit: number = 100, includeSubdocuments: boolean = false, includeTests?: boolean): DataModelContract[] {
     const models: Map<string, DataModelContract> = new Map();
-    const sourceFiles = this.findSourceFiles(this.repoPath);
+    const effectiveIncludeTests = includeTests ?? this.includeTests;
+    const sourceFiles = this.findSourceFiles(this.repoPath, 0, effectiveIncludeTests);
 
     for (const file of sourceFiles) {
       const content = readFileSync(file, "utf-8");
@@ -109,10 +119,19 @@ export class SchemaAnalyzer {
         if (model.isDiscriminator) existing.isDiscriminator = true;
         if (model.hasSoftDelete) existing.hasSoftDelete = true;
         if (model.hasTimestamps) existing.hasTimestamps = true;
+        if (model.isSubdocument === false) {
+          existing.isSubdocument = false;
+          if (existing.collectionOrTable === "(embedded subdocument)") {
+            existing.collectionOrTable = model.collectionOrTable;
+          }
+        }
       }
     }
 
-    const list = Array.from(normalized.values());
+    let list = Array.from(normalized.values());
+    if (!includeSubdocuments) {
+      list = list.filter((m) => !m.isSubdocument);
+    }
     list.sort((a, b) => a.modelName.localeCompare(b.modelName));
     return list.slice(0, limit);
   }
@@ -159,53 +178,38 @@ export class SchemaAnalyzer {
   }
 
   private extractMongooseModels(content: string, relPath: string, out: Map<string, DataModelContract>) {
-    // 1. Standard Schemas: const FooSchema = new Schema({ ... }, { timestamps: true })
-    const schemaRegex = /(?:const|let|var|export\s+const)\s+([a-zA-Z0-9_]+Schema)\s*=\s*new\s+(?:mongoose\.)?Schema(?:<[^>]+>)?\s*\(\s*\{([^}]+)\}(?:,\s*\{([^}]+)\})?/g;
-    let match;
-    while ((match = schemaRegex.exec(content)) !== null) {
-      const rawSchemaName = match[1];
-      const modelName = rawSchemaName.replace(/Schema$/i, "");
-      const schemaBody = match[2];
-      const schemaOpts = match[3] || "";
-
-      const fields = this.parseMongooseFields(schemaBody);
-      const hasTimestamps = /timestamps:\s*true/i.test(schemaOpts) || /timestamps:\s*true/i.test(content);
-      const hasSoftDelete = /softDeletePlugin|deletedAt|isDeleted/i.test(content);
-      const compoundIndexes = this.parseCompoundIndexes(content);
-
-      out.set(modelName, {
+    // 1. Registered Root Models via mongoose.model(...)
+    const modelCallRegex = /(?:mongoose\.)?model(?:<[^>]+>)?\s*\(\s*['"`]([^'"`]+)['"`](?:\s*,\s*([a-zA-Z0-9_]+))?(?:\s*,\s*['"`]([^'"`]+)['"`])?/g;
+    const registeredRootModels = new Map<string, { modelName: string; schemaVar?: string; collection?: string }>();
+    let mMatch;
+    while ((mMatch = modelCallRegex.exec(content)) !== null) {
+      const modelName = mMatch[1];
+      const schemaVar = mMatch[2];
+      const customColl = mMatch[3];
+      registeredRootModels.set(modelName, {
         modelName,
-        collectionOrTable: modelName.toLowerCase() + "s",
-        fields,
-        compoundIndexes,
-        sourceFile: relPath,
-        framework: "Mongoose",
-        hasSoftDelete,
-        hasTimestamps,
+        schemaVar,
+        collection: customColl || (modelName.toLowerCase() + "s"),
       });
     }
 
-    // 2. Mongoose models directly: mongoose.model('ModelName', schema)
-    const modelCallRegex = /(?:mongoose\.)?model(?:<[^>]+>)?\s*\(\s*['"`]([^'"`]+)['"`]/g;
-    while ((match = modelCallRegex.exec(content)) !== null) {
-      const modelName = match[1];
-      if (!out.has(modelName)) {
-        out.set(modelName, {
-          modelName,
-          collectionOrTable: modelName.toLowerCase() + "s",
-          fields: [],
-          sourceFile: relPath,
-          framework: "Mongoose",
-          hasSoftDelete: /softDelete|deletedAt/i.test(content),
-          hasTimestamps: /timestamps/i.test(content),
+    const exportModelRegex = /(?:export\s+const|const|let|var)\s+([a-zA-Z0-9_]+)\s*=\s*(?:mongoose\.)?model/g;
+    let expMatch;
+    while ((expMatch = exportModelRegex.exec(content)) !== null) {
+      const varName = expMatch[1];
+      if (!registeredRootModels.has(varName)) {
+        registeredRootModels.set(varName, {
+          modelName: varName,
+          collection: varName.toLowerCase() + "s",
         });
       }
     }
 
-    // 3. Mongoose Discriminators: Base.discriminator('VariantName', schema)
+    // 2. Mongoose Discriminators: Base.discriminator('VariantName', schema)
     const discRegex = /\.discriminator(?:<[^>]+>)?\s*\(\s*['"`]([^'"`]+)['"`]/g;
-    while ((match = discRegex.exec(content)) !== null) {
-      const discName = match[1];
+    let discMatch;
+    while ((discMatch = discRegex.exec(content)) !== null) {
+      const discName = discMatch[1];
       out.set(discName, {
         modelName: discName,
         collectionOrTable: "matches (discriminator)",
@@ -216,13 +220,15 @@ export class SchemaAnalyzer {
         hasTimestamps: true,
         isDiscriminator: true,
         baseModel: "Match",
+        isSubdocument: false,
       });
     }
 
-    // 4. Module Registry Discriminators: matches: { schema: ... } or registerMatchDiscriminator(mod.id, ...)
+    // Module Registry Discriminators
     const regMatchDiscRegex = /registerMatchDiscriminator\s*\(\s*(?:['"`]([^'"`]+)['"`]|([a-zA-Z0-9_.]+))/g;
-    while ((match = regMatchDiscRegex.exec(content)) !== null) {
-      const id = (match[1] || match[2] || "").replace(/['"`]/g, "");
+    let regMatch;
+    while ((regMatch = regMatchDiscRegex.exec(content)) !== null) {
+      const id = (regMatch[1] || regMatch[2] || "").replace(/['"`]/g, "");
       if (id && id !== "moduleId") {
         const discName = `Match:${id}`;
         out.set(discName, {
@@ -235,6 +241,99 @@ export class SchemaAnalyzer {
           hasTimestamps: true,
           isDiscriminator: true,
           baseModel: "Match",
+          isSubdocument: false,
+        });
+      }
+    }
+
+    // 3. Find all schemas defined via new Schema(...)
+    const schemaRegex = /(?:const|let|var|export\s+const)\s+([a-zA-Z0-9_]+Schema)\s*=\s*new\s+(?:mongoose\.)?Schema(?:<[^>]+>)?\s*\(\s*\{([^}]+)\}(?:,\s*\{([^}]+)\})?/g;
+    let sMatch;
+    const schemasFound: Array<{
+      rawSchemaName: string;
+      modelName: string;
+      fields: DataField[];
+      schemaOpts: string;
+      hasIdFalse: boolean;
+      hasTimestamps: boolean;
+      hasSoftDelete: boolean;
+      compoundIndexes?: CompoundIndex[];
+    }> = [];
+
+    while ((sMatch = schemaRegex.exec(content)) !== null) {
+      const rawSchemaName = sMatch[1];
+      const modelName = rawSchemaName.replace(/Schema$/i, "");
+      const schemaBody = sMatch[2];
+      const schemaOpts = sMatch[3] || "";
+      const fields = this.parseMongooseFields(schemaBody);
+      const hasIdFalse = /_id:\s*false/i.test(schemaOpts) || /_id:\s*false/i.test(schemaBody);
+      const hasTimestamps = /timestamps:\s*true/i.test(schemaOpts) || /timestamps:\s*true/i.test(content);
+      const hasSoftDelete = /softDeletePlugin|deletedAt|isDeleted/i.test(content);
+      const compoundIndexes = this.parseCompoundIndexes(content);
+
+      schemasFound.push({
+        rawSchemaName,
+        modelName,
+        fields,
+        schemaOpts,
+        hasIdFalse,
+        hasTimestamps,
+        hasSoftDelete,
+        compoundIndexes,
+      });
+    }
+
+    // 4. Correlate schemas with root models vs subdocuments
+    if (registeredRootModels.size > 0) {
+      for (const [rName, rInfo] of registeredRootModels.entries()) {
+        const matchingSchema =
+          schemasFound.find(
+            (s) => (rInfo.schemaVar && s.rawSchemaName === rInfo.schemaVar) || s.modelName.toLowerCase() === rName.toLowerCase()
+          ) || schemasFound[schemasFound.length - 1];
+
+        out.set(rName, {
+          modelName: rName,
+          collectionOrTable: rInfo.collection || (rName.toLowerCase() + "s"),
+          fields: matchingSchema ? matchingSchema.fields : [],
+          compoundIndexes: matchingSchema?.compoundIndexes,
+          sourceFile: relPath,
+          framework: "Mongoose",
+          hasSoftDelete: matchingSchema ? matchingSchema.hasSoftDelete : /softDelete|deletedAt/i.test(content),
+          hasTimestamps: matchingSchema ? matchingSchema.hasTimestamps : /timestamps/i.test(content),
+          isSubdocument: false,
+        });
+
+        // Any other schema in this file is an embedded subdocument
+        for (const s of schemasFound) {
+          if (matchingSchema && s.rawSchemaName === matchingSchema.rawSchemaName) continue;
+          out.set(s.modelName, {
+            modelName: s.modelName,
+            collectionOrTable: "(embedded subdocument)",
+            fields: s.fields,
+            compoundIndexes: s.compoundIndexes,
+            sourceFile: relPath,
+            framework: "Mongoose",
+            hasSoftDelete: s.hasSoftDelete,
+            hasTimestamps: s.hasTimestamps,
+            isSubdocument: true,
+            parentModel: rName,
+          });
+        }
+      }
+    } else {
+      // No explicit root model registered in this file
+      for (const s of schemasFound) {
+        const isLikelySubdoc = s.hasIdFalse || /Data$|Viewer$|Member$|Item$|Option$|Answer$/i.test(s.modelName);
+        out.set(s.modelName, {
+          modelName: s.modelName,
+          collectionOrTable: isLikelySubdoc ? "(embedded subdocument)" : s.modelName.toLowerCase() + "s",
+          fields: s.fields,
+          compoundIndexes: s.compoundIndexes,
+          sourceFile: relPath,
+          framework: "Mongoose",
+          hasSoftDelete: s.hasSoftDelete,
+          hasTimestamps: s.hasTimestamps,
+          isSubdocument: isLikelySubdoc,
         });
       }
     }
@@ -443,34 +542,23 @@ export class SchemaAnalyzer {
     }
   }
 
-  private findSourceFiles(dir: string, depth: number = 0): string[] {
+  private findSourceFiles(dir: string, depth: number = 0, includeTests: boolean = this.includeTests): string[] {
     if (depth > 15) return [];
     const files: string[] = [];
     try {
       const entries = readdirSync(dir);
       for (const entry of entries) {
-        if (
-          entry === "node_modules" ||
-          entry === "target" ||
-          entry === ".git" ||
-          entry === "dist" ||
-          entry === "build" ||
-          entry === ".autodoc" ||
-          entry === ".turbo" ||
-          entry === ".next" ||
-          entry === "vendor" ||
-          entry === "__pycache__" ||
-          entry === ".venv" ||
-          entry === ".cargo" ||
-          entry.startsWith(".")
-        ) {
+        if (isIgnoredDirectory(entry, includeTests)) {
           continue;
         }
         const fullPath = join(dir, entry);
         const stat = statSync(fullPath);
         if (stat.isDirectory()) {
-          files.push(...this.findSourceFiles(fullPath, depth + 1));
+          files.push(...this.findSourceFiles(fullPath, depth + 1, includeTests));
         } else if (stat.isFile()) {
+          if (!includeTests && isTestPath(fullPath)) {
+            continue;
+          }
           const ext = extname(fullPath);
           if ([".ts", ".tsx", ".js", ".jsx", ".prisma", ".sql", ".py", ".go", ".rs", ".java", ".kt", ".cs"].includes(ext)) {
             files.push(fullPath);

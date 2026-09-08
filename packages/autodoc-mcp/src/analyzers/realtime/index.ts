@@ -1,5 +1,6 @@
 import { readFileSync, readdirSync, statSync, existsSync } from "node:fs";
 import { join, extname } from "node:path";
+import { isIgnoredDirectory, isTestPath } from "../utils.js";
 
 export interface DiscoveredSocketEvent {
   eventName: string;
@@ -12,16 +13,23 @@ export interface DiscoveredSocketEvent {
   acknowledgement?: boolean;
 }
 
+export interface RealtimeAnalyzerOptions {
+  includeTests?: boolean;
+}
+
 export class RealtimeAnalyzer {
   private repoPath: string;
+  private includeTests: boolean;
 
-  constructor(repoPath: string = process.cwd()) {
+  constructor(repoPath: string = process.cwd(), options: RealtimeAnalyzerOptions = {}) {
     this.repoPath = repoPath;
+    this.includeTests = options.includeTests ?? false;
   }
 
-  public discoverSocketContracts(directionFilter: string = "ALL", limit: number = 200): DiscoveredSocketEvent[] {
+  public discoverSocketContracts(directionFilter: string = "ALL", limit: number = 200, includeTests?: boolean): DiscoveredSocketEvent[] {
     const events: Map<string, DiscoveredSocketEvent> = new Map();
-    const sourceFiles = this.findSourceFiles(this.repoPath);
+    const effectiveIncludeTests = includeTests ?? this.includeTests;
+    const sourceFiles = this.findSourceFiles(this.repoPath, 0, effectiveIncludeTests);
 
     for (const file of sourceFiles) {
       const content = readFileSync(file, "utf-8");
@@ -302,34 +310,23 @@ export class RealtimeAnalyzer {
     }
   }
 
-  private findSourceFiles(dir: string, depth: number = 0): string[] {
+  private findSourceFiles(dir: string, depth: number = 0, includeTests: boolean = this.includeTests): string[] {
     if (depth > 15) return [];
     const files: string[] = [];
     try {
       const entries = readdirSync(dir);
       for (const entry of entries) {
-        if (
-          entry === "node_modules" ||
-          entry === "target" ||
-          entry === ".git" ||
-          entry === "dist" ||
-          entry === "build" ||
-          entry === ".autodoc" ||
-          entry === ".turbo" ||
-          entry === ".next" ||
-          entry === "vendor" ||
-          entry === "__pycache__" ||
-          entry === ".venv" ||
-          entry === ".cargo" ||
-          entry.startsWith(".")
-        ) {
+        if (isIgnoredDirectory(entry, includeTests)) {
           continue;
         }
         const fullPath = join(dir, entry);
         const stat = statSync(fullPath);
         if (stat.isDirectory()) {
-          files.push(...this.findSourceFiles(fullPath, depth + 1));
+          files.push(...this.findSourceFiles(fullPath, depth + 1, includeTests));
         } else if (stat.isFile()) {
+          if (!includeTests && isTestPath(fullPath)) {
+            continue;
+          }
           const ext = extname(fullPath);
           if ([".ts", ".tsx", ".js", ".jsx", ".py", ".go", ".rs", ".java", ".kt", ".cs"].includes(ext)) {
             files.push(fullPath);

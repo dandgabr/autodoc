@@ -22,6 +22,12 @@ describe("Agnostic Discovery Engines (Workspace, Containers, REST, Realtime, Sch
     expect(info.commands.install).toBe("pnpm install");
     expect(info.commands.build).toBe("pnpm build");
     expect(info.commands.test).toBe("pnpm test");
+
+    // Verify Makefile detection
+    expect(info.makefile?.hasMakefile).toBe(true);
+    expect(info.makefile?.targets).toContain("dev");
+    expect(info.makefile?.targets).toContain("down");
+    expect(info.makefile?.recommendedCommand).toBe("make dev");
   });
 
   it("should analyze container infrastructure agnostically", () => {
@@ -56,6 +62,14 @@ describe("Agnostic Discovery Engines (Workspace, Containers, REST, Realtime, Sch
     // Verify authentication detection
     const authProtected = endpoints.filter((e) => e.auth?.includes("Bearer") || e.auth?.includes("Session"));
     expect(authProtected.length).toBeGreaterThan(0);
+
+    // Verify canonical router mount disambiguation (no phantom /api/users/users/:id/role)
+    const adminRoleEndpoint = endpoints.find((e) => e.endpoint.includes("/role"));
+    expect(adminRoleEndpoint).toBeDefined();
+    expect(adminRoleEndpoint?.endpoint).toBe("/api/admin/users/:userId/role");
+
+    const phantomDuplicate = endpoints.find((e) => e.endpoint.includes("/api/users/users"));
+    expect(phantomDuplicate).toBeUndefined();
   });
 
   it("should discover realtime contracts across room runtime and game modules", () => {
@@ -95,6 +109,17 @@ describe("Agnostic Discovery Engines (Workspace, Containers, REST, Realtime, Sch
     // Verify soft-delete and timestamps
     const withTimestamps = models.filter((m) => m.hasTimestamps);
     expect(withTimestamps.length).toBeGreaterThan(0);
+
+    // Verify subdocument filtering: rounddatas and viewers must NOT be root collections
+    const rootCollections = models.map((m) => m.collectionOrTable.toLowerCase());
+    expect(rootCollections).not.toContain("rounddatas");
+    expect(rootCollections).not.toContain("viewers");
+
+    // Verify subdocuments are classified when includeSubdocuments is true
+    const allModels = analyzer.discoverModels(150, true);
+    const viewerSubdoc = allModels.find((m) => m.modelName.toLowerCase().includes("viewer"));
+    expect(viewerSubdoc).toBeDefined();
+    expect(viewerSubdoc?.isSubdocument).toBe(true);
   });
 
   it("should generate semantic C4 diagrams with real infrastructure nodes", () => {
@@ -124,6 +149,7 @@ describe("Agnostic Discovery Engines (Workspace, Containers, REST, Realtime, Sch
     expect(gettingStarted).toBeDefined();
     expect(gettingStarted?.content).toContain("pnpm install");
     expect(gettingStarted?.content).toContain("docker compose up -d");
+    expect(gettingStarted?.content).toContain("make dev");
 
     const howTo = docs.find((d) => d.relativePath === "how-to/add-new-module.md");
     expect(howTo).toBeDefined();
@@ -135,5 +161,31 @@ describe("Agnostic Discovery Engines (Workspace, Containers, REST, Realtime, Sch
     const rouletteRef = docs.find((d) => d.relativePath === "reference/modules/roulette.md");
     expect(rouletteRef).toBeDefined();
     expect(rouletteRef?.content).toContain("roulette:place_bet");
+  });
+
+  it("should exclude test suite noise by default and include when requested", () => {
+    // 1. RealtimeAnalyzer: channels.test.ts defines dummy channels room:abc and room:abc:spectators
+    const productionRealtime = new RealtimeAnalyzer(butecoPath, { includeTests: false });
+    const prodEvents = productionRealtime.discoverSocketContracts("ALL", 500);
+
+    const hasTestDummyRoom = prodEvents.some(
+      (e) => e.eventName === "room:abc" || e.eventName === "room:abc:spectators"
+    );
+    expect(hasTestDummyRoom).toBe(false);
+
+    const testInclusiveRealtime = new RealtimeAnalyzer(butecoPath, { includeTests: true });
+    const allEvents = testInclusiveRealtime.discoverSocketContracts("ALL", 500);
+    const hasTestDummyRoomInInclusive = allEvents.some(
+      (e) => e.eventName === "room:abc" || e.eventName === "room:abc:spectators"
+    );
+    expect(hasTestDummyRoomInInclusive).toBe(true);
+
+    // 2. RestAnalyzer: should exclude test files by default
+    const prodRest = new RestAnalyzer(butecoPath, { includeTests: false });
+    const prodEndpoints = prodRest.discoverEndpoints("ALL", 500);
+    const hasTestEndpoint = prodEndpoints.some(
+      (e) => e.sourceFile?.includes(".test.") || e.sourceFile?.includes(".spec.")
+    );
+    expect(hasTestEndpoint).toBe(false);
   });
 });

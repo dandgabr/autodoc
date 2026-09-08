@@ -29,6 +29,13 @@ export type PackageManagerType =
   | "bundler"
   | "unknown";
 
+export interface MakefileWorkflow {
+  hasMakefile: boolean;
+  targets: string[];
+  devTarget?: string;
+  recommendedCommand?: string;
+}
+
 export interface WorkspaceInfo {
   isMonorepo: boolean;
   packageManager: PackageManagerType;
@@ -42,6 +49,7 @@ export interface WorkspaceInfo {
     test: string;
     dev: string;
   };
+  makefile?: MakefileWorkflow;
 }
 
 export class WorkspaceAnalyzer {
@@ -76,6 +84,7 @@ export class WorkspaceAnalyzer {
     }
 
     const commands = this.resolveCommands(packageManager);
+    const makefile = this.detectMakefileWorkflow();
 
     return {
       isMonorepo,
@@ -84,6 +93,7 @@ export class WorkspaceAnalyzer {
       packages,
       packageDependencyGraph,
       commands,
+      makefile,
     };
   }
 
@@ -402,6 +412,33 @@ export class WorkspaceAnalyzer {
           test: "npm test",
           dev: "npm run dev",
         };
+    }
+  }
+
+  private detectMakefileWorkflow(): MakefileWorkflow {
+    const makefilePath = join(this.repoPath, "Makefile");
+    if (!existsSync(makefilePath)) {
+      return { hasMakefile: false, targets: [] };
+    }
+
+    try {
+      const content = readFileSync(makefilePath, "utf-8");
+      const targetRegex = /^([a-zA-Z0-9_-]+)\s*:/gm;
+      const targets: string[] = [];
+      let match;
+      while ((match = targetRegex.exec(content)) !== null) {
+        targets.push(match[1]);
+      }
+
+      const devTarget = targets.find((t) => t === "dev" || t === "start" || t === "run");
+      return {
+        hasMakefile: true,
+        targets,
+        devTarget,
+        recommendedCommand: devTarget ? `make ${devTarget}` : undefined,
+      };
+    } catch {
+      return { hasMakefile: false, targets: [] };
     }
   }
 }

@@ -3,6 +3,7 @@ import { join, basename } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { WorkspaceAnalyzer, WorkspaceInfo } from "./workspace.js";
 import { ContainerInfraAnalyzer, ContainerInfraReport } from "./containers.js";
+import { isTestPath } from "./utils.js";
 
 export interface ArchitectureNode {
   id: string;
@@ -399,7 +400,7 @@ export class ArchitectureAnalyzer {
       try {
         const db = new DatabaseSync(this.dbPath, { readOnly: true });
 
-        // Query dominant components
+        // Query dominant application software components (filtering out scripts, backups, migrations, tests)
         const symbolsStmt = db.prepare(`
           SELECT s.symbol_id, s.name, s.kind, s.fqsn, s.cyclomatic_complexity, f.path
           FROM symbols s
@@ -407,6 +408,15 @@ export class ArchitectureAnalyzer {
           WHERE s.kind IN ('class', 'interface', 'struct', 'function')
             AND f.path NOT LIKE '%test%'
             AND f.path NOT LIKE '%spec%'
+            AND f.path NOT LIKE '%mock%'
+            AND f.path NOT LIKE '%fixture%'
+            AND f.path NOT LIKE '%.sh'
+            AND f.path NOT LIKE '%.bash'
+            AND f.path NOT LIKE '%.zsh'
+            AND f.path NOT LIKE '%scripts/%'
+            AND f.path NOT LIKE '%migrations/%'
+            AND f.path NOT LIKE '%backup%'
+            AND (f.path LIKE '%src/%' OR f.path LIKE '%lib/%' OR f.path LIKE '%packages/%' OR f.path LIKE '%crates/%' OR f.path LIKE '%app/%' OR f.path LIKE '%pkg/%' OR f.path LIKE '%internal/%')
           ORDER BY s.cyclomatic_complexity DESC, s.line_end - s.line_start DESC
           LIMIT ?
         `);
@@ -420,8 +430,22 @@ export class ArchitectureAnalyzer {
         }>;
 
         const symbolIdMap = new Map<number, string>();
+        const validRows: typeof rows = [];
 
         for (const r of rows) {
+          if (
+            isTestPath(r.path) ||
+            r.path.endsWith(".sh") ||
+            r.path.endsWith(".bash") ||
+            r.path.endsWith(".zsh") ||
+            r.path.includes("scripts/") ||
+            r.path.includes("backup") ||
+            r.path.includes("migration")
+          ) {
+            continue;
+          }
+
+          validRows.push(r);
           const safeId = `comp_${r.symbol_id}`;
           symbolIdMap.set(r.symbol_id, safeId);
 
@@ -444,8 +468,8 @@ export class ArchitectureAnalyzer {
         }
 
         // Query call graph edges between these components
-        if (rows.length > 0) {
-          const ids = rows.map((r) => r.symbol_id).join(",");
+        if (validRows.length > 0) {
+          const ids = validRows.map((r) => r.symbol_id).join(",");
           const edgesStmt = db.prepare(`
             SELECT caller_id, callee_id, edge_kind, weight
             FROM edges

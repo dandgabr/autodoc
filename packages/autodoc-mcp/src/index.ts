@@ -109,6 +109,7 @@ export function createServer(): Server {
               protocol_filter: { type: "string", enum: ["ALL", "REST", "SOAP", "GRPC", "GRAPHQL", "CORBA"] },
               limit: { type: "number", description: "Pagination limit. Default: 50." },
               cursor: { type: "string", description: "Next page cursor." },
+              include_tests: { type: "boolean", description: "Whether to include test suites and mock files (default: false)." },
             },
           },
         },
@@ -121,6 +122,7 @@ export function createServer(): Server {
               repository_path: { type: "string", description: "Target repository path (optional, defaults to last scanned path or cwd)." },
               direction_filter: { type: "string", enum: ["ALL", "CLIENT_TO_SERVER", "SERVER_TO_CLIENT", "BIDIRECTIONAL"] },
               limit: { type: "number", description: "Pagination limit. Default: 50." },
+              include_tests: { type: "boolean", description: "Whether to include test suites and mock files (default: false)." },
             },
           },
         },
@@ -132,6 +134,7 @@ export function createServer(): Server {
             properties: {
               repository_path: { type: "string", description: "Target repository path (optional, defaults to last scanned path or cwd)." },
               output_dir: { type: "string", description: "Target directory path on disk (e.g. ./docs)." },
+              include_tests: { type: "boolean", description: "Whether to include test suites and mock files (default: false)." },
             },
           },
         },

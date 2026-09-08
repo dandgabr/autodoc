@@ -26,8 +26,13 @@ export interface DiscoveredModuleInfo {
   models: DataModelContract[];
 }
 
+export interface DiataxisGeneratorOptions {
+  includeTests?: boolean;
+}
+
 export class DiataxisGenerator {
   private repoPath: string;
+  private includeTests: boolean;
   private archAnalyzer: ArchitectureAnalyzer;
   private restAnalyzer: RestAnalyzer;
   private realtimeAnalyzer: RealtimeAnalyzer;
@@ -36,12 +41,13 @@ export class DiataxisGenerator {
   private workspaceInfo: WorkspaceInfo;
   private containerReport: ContainerInfraReport;
 
-  constructor(repoPath: string = process.cwd()) {
+  constructor(repoPath: string = process.cwd(), options: DiataxisGeneratorOptions = {}) {
     this.repoPath = repoPath;
+    this.includeTests = options.includeTests ?? false;
     this.archAnalyzer = new ArchitectureAnalyzer(repoPath);
-    this.restAnalyzer = new RestAnalyzer(repoPath);
-    this.realtimeAnalyzer = new RealtimeAnalyzer(repoPath);
-    this.schemaAnalyzer = new SchemaAnalyzer(repoPath);
+    this.restAnalyzer = new RestAnalyzer(repoPath, { includeTests: this.includeTests });
+    this.realtimeAnalyzer = new RealtimeAnalyzer(repoPath, { includeTests: this.includeTests });
+    this.schemaAnalyzer = new SchemaAnalyzer(repoPath, { includeTests: this.includeTests });
     this.honestyAnalyzer = new HonestyAnalyzer(repoPath);
     this.workspaceInfo = new WorkspaceAnalyzer(repoPath).analyze();
     this.containerReport = new ContainerInfraAnalyzer(repoPath).analyze();
@@ -170,8 +176,11 @@ export class DiataxisGenerator {
     });
 
     // Data Models
-    const models = this.schemaAnalyzer.discoverModels(150);
-    const modelSections = models.map((m: DataModelContract) => {
+    const rootModels = this.schemaAnalyzer.discoverModels(150, false);
+    const allModels = this.schemaAnalyzer.discoverModels(200, true);
+    const subdocuments = allModels.filter((m) => m.isSubdocument);
+
+    const renderModelCard = (m: DataModelContract) => {
       const fieldRows = m.fields.map(
         (f: DataField) =>
           `| \`${f.name}\` | \`${f.type}\` | ${f.required ? "Yes" : "No"} | ${f.indexed ? "Indexed" : "-"} |`
@@ -184,8 +193,9 @@ export class DiataxisGenerator {
           : "";
 
       return [
-        `### Model: \`${m.modelName}\` (\`${m.collectionOrTable}\`)`,
+        `### ${m.isSubdocument ? "Embedded Structure" : "Model"}: \`${m.modelName}\` (\`${m.collectionOrTable}\`)`,
         `- **Framework**: ${m.framework}`,
+        m.parentModel ? `- **Containing Parent Model**: \`${m.parentModel}\`` : "",
         `- **Soft Delete**: ${m.hasSoftDelete ? "Enabled" : "Disabled"}`,
         `- **Timestamps**: ${m.hasTimestamps ? "Enabled" : "Disabled"}`,
         m.isDiscriminator ? `- **Polymorphic Discriminator**: Base \`${m.baseModel || "Parent"}\`` : "",
@@ -195,7 +205,10 @@ export class DiataxisGenerator {
         fieldRows.length > 0 ? "| Field Name | Type | Required | Indexing |\n| :--- | :--- | :--- | :--- |\n" + fieldRows.join("\n") : "_No top-level scalar fields or polymorphic child schema._",
         "",
       ].filter(Boolean).join("\n");
-    });
+    };
+
+    const rootModelSections = rootModels.map(renderModelCard);
+    const subdocSections = subdocuments.map(renderModelCard);
 
     docs.push({
       relativePath: "reference/data-models.md",
@@ -204,14 +217,24 @@ export class DiataxisGenerator {
       content: [
         `# Data Models & Persistence Schemas`,
         "",
-        `Total Data Models Discovered: **${models.length}**`,
+        `Total Root Models & Collections: **${rootModels.length}** | Embedded Subdocuments: **${subdocuments.length}**`,
         "",
-        ...modelSections,
+        "## 1. Root Models & Collections",
+        "",
+        ...rootModelSections,
+        "",
+        ...(subdocuments.length > 0
+          ? [
+              "## 2. Embedded Subdocuments & Value Objects",
+              "",
+              ...subdocSections,
+            ]
+          : []),
       ].join("\n"),
     });
 
     // Business Modules Reference Catalog
-    const discoveredModules = this.discoverBusinessModules(endpoints, socketEvents, models);
+    const discoveredModules = this.discoverBusinessModules(endpoints, socketEvents, rootModels);
     if (discoveredModules.length > 0) {
       const moduleSummaryRows = discoveredModules.map(
         (m) =>
@@ -289,10 +312,24 @@ export class DiataxisGenerator {
         "```",
         "_Configure database credentials (`MONGODB_URI`), cache (`VALKEY_URL`), and authentication secrets (`DISCORD_CLIENT_ID`, `BETTER_AUTH_SECRET`)._",
         "",
-        "## 3. Start Infrastructure Services",
-        "```bash",
-        containerInstruction,
-        "```",
+        "## 3. Start Infrastructure & Development Workflow",
+        ...(this.workspaceInfo.makefile?.devTarget
+          ? [
+              "```bash",
+              "# Recommended shortcut via Makefile (starts backing containers & launches dev servers):",
+              `make ${this.workspaceInfo.makefile.devTarget}`,
+              "```",
+              "",
+              "Alternatively, start backing infrastructure services independently:",
+              "```bash",
+              containerInstruction,
+              "```",
+            ]
+          : [
+              "```bash",
+              containerInstruction,
+              "```",
+            ]),
         "",
         "## 4. Install Dependencies & Build",
         "```bash",
@@ -305,11 +342,15 @@ export class DiataxisGenerator {
         "",
         "## 5. Running the Application & Tests",
         "```bash",
-        "# Run development servers",
-        cmds.dev,
+        this.workspaceInfo.makefile?.devTarget
+          ? `# Run dev server (via package manager or make):\n${cmds.dev}\n# or: make ${this.workspaceInfo.makefile.devTarget}`
+          : `# Run development servers\n${cmds.dev}`,
         "",
         "# Run test suite",
         cmds.test,
+        ...(this.workspaceInfo.makefile?.targets.includes("down")
+          ? ["", "# Stop backing services via Makefile", "make down"]
+          : []),
         "```",
       ].join("\n"),
     });

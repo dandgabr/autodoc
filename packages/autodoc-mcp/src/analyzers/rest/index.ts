@@ -1,5 +1,6 @@
 import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { join, extname, basename, dirname } from "node:path";
+import { isIgnoredDirectory, isTestPath } from "../utils.js";
 
 export interface DiscoveredEndpoint {
   endpoint: string;
@@ -10,6 +11,10 @@ export interface DiscoveredEndpoint {
   handler?: string;
 }
 
+export interface RestAnalyzerOptions {
+  includeTests?: boolean;
+}
+
 interface RouteMount {
   prefix: string;
   routerIdentifier?: string;
@@ -18,14 +23,17 @@ interface RouteMount {
 
 export class RestAnalyzer {
   private repoPath: string;
+  private includeTests: boolean;
 
-  constructor(repoPath: string = process.cwd()) {
+  constructor(repoPath: string = process.cwd(), options: RestAnalyzerOptions = {}) {
     this.repoPath = repoPath;
+    this.includeTests = options.includeTests ?? false;
   }
 
-  public discoverEndpoints(filterProtocol: string = "ALL", limit: number = 200): DiscoveredEndpoint[] {
+  public discoverEndpoints(filterProtocol: string = "ALL", limit: number = 200, includeTests?: boolean): DiscoveredEndpoint[] {
     const endpoints: DiscoveredEndpoint[] = [];
-    const sourceFiles = this.findSourceFiles(this.repoPath);
+    const effectiveIncludeTests = includeTests ?? this.includeTests;
+    const sourceFiles = this.findSourceFiles(this.repoPath, 0, effectiveIncludeTests);
 
     // Pass 1: Build mount table (IoC, module registries, Express app.use, Fastify, FastAPI, Gin, etc.)
     const { fileToPrefixes, identifierToPrefixes, dirToPrefixes } = this.buildMountTable(sourceFiles);
@@ -84,8 +92,10 @@ export class RestAnalyzer {
     const identifierToPrefixes = new Map<string, Set<string>>();
     const dirToPrefixes = new Map<string, Set<string>>();
 
+    const relevantFiles: Array<{ file: string; content: string }> = [];
+
+    // Pass 1: Read relevant files and collect all route mounts and prefixes
     for (const file of sourceFiles) {
-      // Look primarily in app, server, index, routes, or module configuration files
       const relPath = this.toRelative(file);
       if (
         !relPath.includes("route") &&
@@ -104,6 +114,8 @@ export class RestAnalyzer {
       } catch {
         continue;
       }
+
+      relevantFiles.push({ file, content });
 
       // 1. Express / Koa mounts: app.use('/api/users', usersRouter)
       const appUseRegex = /(?:app|router|server)\.use\s*\(\s*(?:\[([^\]]+)\]|['"`]([^'"`]+)['"`])\s*,\s*([a-zA-Z0-9_]+)/g;
@@ -164,9 +176,13 @@ export class RestAnalyzer {
         }
         identifierToPrefixes.get(identifier)!.add(prefix);
       }
+    }
 
-      // 5. Imports resolution: import { usersRouter } from "./routes/users.js"
+    // Pass 2: Map exact imports and requires to resolved file paths
+    for (const { file, content } of relevantFiles) {
+      // ES Imports: import usersRouter from "./routes/users.js" or import { usersRouter } from ...
       const importRegex = /import\s+(?:\{([^}]+)\}|([a-zA-Z0-9_]+))\s+from\s+['"`]([^'"`]+)['"`]/g;
+      let match;
       while ((match = importRegex.exec(content)) !== null) {
         const importedNames = match[1]
           ? match[1].split(",").map((s) => s.trim().split(/\s+as\s+/).pop()!.trim())
@@ -174,10 +190,33 @@ export class RestAnalyzer {
         const importPath = match[3];
         if (!importPath.startsWith(".")) continue;
 
-        // Resolve imported file
         const resolvedPath = this.resolveImportPath(dirname(file), importPath);
         if (resolvedPath) {
           for (const name of importedNames) {
+            if (identifierToPrefixes.has(name)) {
+              if (!fileToPrefixes.has(resolvedPath)) {
+                fileToPrefixes.set(resolvedPath, new Set());
+              }
+              for (const p of identifierToPrefixes.get(name)!) {
+                fileToPrefixes.get(resolvedPath)!.add(p);
+              }
+            }
+          }
+        }
+      }
+
+      // CommonJS requires: const usersRouter = require("./routes/users")
+      const requireRegex = /(?:const|let|var)\s+(?:\{([^}]+)\}|([a-zA-Z0-9_]+))\s*=\s*require\s*\(\s*['"`]([^'"`]+)['"`]\s*\)/g;
+      while ((match = requireRegex.exec(content)) !== null) {
+        const reqNames = match[1]
+          ? match[1].split(",").map((s) => s.trim().split(/\s*:\s*/).pop()!.trim())
+          : [match[2]];
+        const reqPath = match[3];
+        if (!reqPath.startsWith(".")) continue;
+
+        const resolvedPath = this.resolveImportPath(dirname(file), reqPath);
+        if (resolvedPath) {
+          for (const name of reqNames) {
             if (identifierToPrefixes.has(name)) {
               if (!fileToPrefixes.has(resolvedPath)) {
                 fileToPrefixes.set(resolvedPath, new Set());
@@ -212,25 +251,34 @@ export class RestAnalyzer {
     identifierToPrefixes: Map<string, Set<string>>,
     dirToPrefixes: Map<string, Set<string>>
   ): string[] {
-    const prefixes = new Set<string>();
-
-    // 1. Direct file match
-    if (fileToPrefixes.has(file)) {
-      for (const p of fileToPrefixes.get(file)!) prefixes.add(p);
+    // 1. Direct file match (highest precedence: exact import-bound file from app.use/register/include_router)
+    if (fileToPrefixes.has(file) && fileToPrefixes.get(file)!.size > 0) {
+      return Array.from(fileToPrefixes.get(file)!);
     }
 
-    // 2. Directory match (e.g. module folder)
+    // 2. Directory match (e.g. module folder with registered router)
+    const matchingDirPrefixes = new Set<string>();
     for (const [dir, dirPrefixes] of dirToPrefixes.entries()) {
       if (file.startsWith(dir)) {
-        for (const p of dirPrefixes) prefixes.add(p);
+        for (const p of dirPrefixes) matchingDirPrefixes.add(p);
       }
     }
+    if (matchingDirPrefixes.size > 0) {
+      return Array.from(matchingDirPrefixes);
+    }
 
-    // 3. Identifier / filename heuristics (e.g. routes/users.ts -> match usersRouter)
-    const base = basename(file, extname(file)).replace(/\.routes$/, "").replace(/-router$/, "").replace(/Router$/, "");
+    // 3. Exact identifier / filename match (only if file has no direct or directory binding)
+    const base = basename(file, extname(file))
+      .replace(/\.routes?$/, "")
+      .replace(/-router$/, "")
+      .replace(/Router$/, "")
+      .replace(/Controller$/, "");
+    const baseClean = base.toLowerCase().replace(/[-_]/g, "");
+
+    const prefixes = new Set<string>();
     for (const [id, idPrefixes] of identifierToPrefixes.entries()) {
-      const idClean = id.toLowerCase().replace(/router$/, "");
-      if (idClean === base.toLowerCase() || base.toLowerCase().includes(idClean)) {
+      const idClean = id.toLowerCase().replace(/router$/, "").replace(/controller$/, "").replace(/[-_]/g, "");
+      if (idClean === baseClean && baseClean.length > 0) {
         for (const p of idPrefixes) prefixes.add(p);
       }
     }
@@ -443,41 +491,31 @@ export class RestAnalyzer {
   private joinPrefixAndPath(prefix: string, path: string): string {
     const cleanPrefix = prefix.replace(/\/+$/, "");
     const cleanPath = path.startsWith("/") ? path : `/${path}`;
-    if (cleanPrefix === cleanPath) return cleanPrefix;
+    if (!cleanPrefix) return cleanPath;
     if (cleanPath === "/") return cleanPrefix || "/";
+    if (cleanPrefix === cleanPath) return cleanPrefix;
     return `${cleanPrefix}${cleanPath}`;
   }
 
-  private findSourceFiles(dir: string, depth: number = 0): string[] {
+  private findSourceFiles(dir: string, depth: number = 0, includeTests: boolean = this.includeTests): string[] {
     if (depth > 15) return [];
     const files: string[] = [];
 
     try {
       const entries = readdirSync(dir);
       for (const entry of entries) {
-        if (
-          entry === "node_modules" ||
-          entry === "target" ||
-          entry === ".git" ||
-          entry === "dist" ||
-          entry === "build" ||
-          entry === ".autodoc" ||
-          entry === ".turbo" ||
-          entry === ".next" ||
-          entry === "vendor" ||
-          entry === "__pycache__" ||
-          entry === ".venv" ||
-          entry === ".cargo" ||
-          entry.startsWith(".")
-        ) {
+        if (isIgnoredDirectory(entry, includeTests)) {
           continue;
         }
 
         const fullPath = join(dir, entry);
         const stat = statSync(fullPath);
         if (stat.isDirectory()) {
-          files.push(...this.findSourceFiles(fullPath, depth + 1));
+          files.push(...this.findSourceFiles(fullPath, depth + 1, includeTests));
         } else if (stat.isFile()) {
+          if (!includeTests && isTestPath(fullPath)) {
+            continue;
+          }
           const ext = extname(fullPath);
           if (matchesSourceExt(ext)) {
             files.push(fullPath);
