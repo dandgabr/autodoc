@@ -18,6 +18,10 @@ import {
   handleTraceDataFlow,
   ListApiContractsSchema,
   handleListApiContracts,
+  ListSocketContractsSchema,
+  handleListSocketContracts,
+  ExportDocumentationSchema,
+  handleExportDocumentation,
   GenerateAdrSchema,
   handleGenerateAdr,
   PurgeCacheSchema,
@@ -103,6 +107,27 @@ export function createServer(): Server {
           },
         },
         {
+          name: "autodoc_list_socket_contracts",
+          description: "Inventories realtime event contracts (Socket.io typed contracts, rooms, acknowledgements) and WebRTC signaling channels.",
+          inputSchema: {
+            type: "object",
+            properties: {
+              direction_filter: { type: "string", enum: ["ALL", "CLIENT_TO_SERVER", "SERVER_TO_CLIENT", "BIDIRECTIONAL"] },
+              limit: { type: "number", description: "Pagination limit. Default: 50." },
+            },
+          },
+        },
+        {
+          name: "autodoc_export_documentation",
+          description: "Synthesizes and exports complete Diátaxis living documentation set (Tutorials, How-To, Reference, Architecture) to physical disk directory.",
+          inputSchema: {
+            type: "object",
+            properties: {
+              output_dir: { type: "string", description: "Target directory path on disk (e.g. ./docs)." },
+            },
+          },
+        },
+        {
           name: "autodoc_generate_adr",
           description: "Synthesizes architectural decision records in localized Markdown MADR format.",
           inputSchema: {
@@ -144,6 +169,10 @@ export function createServer(): Server {
         return await handleTraceDataFlow(TraceDataFlowSchema.parse(args || {}));
       case "autodoc_list_api_contracts":
         return await handleListApiContracts(ListApiContractsSchema.parse(args || {}));
+      case "autodoc_list_socket_contracts":
+        return await handleListSocketContracts(ListSocketContractsSchema.parse(args || {}));
+      case "autodoc_export_documentation":
+        return await handleExportDocumentation(ExportDocumentationSchema.parse(args || {}));
       case "autodoc_generate_adr":
         return await handleGenerateAdr(GenerateAdrSchema.parse(args || {}));
       case "autodoc_purge_cache":

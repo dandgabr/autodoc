@@ -164,6 +164,8 @@ Add to `.cursor/mcp.json`:
 | `autodoc_get_symbol_contract` | Extracts symbol signature wrapped in semantic prompt defense boundaries. |
 | `autodoc_trace_data_flow` | Traces taint data flows from entrypoint sources to storage sinks. |
 | `autodoc_list_api_contracts` | Inventories service endpoints (REST, SOAP, gRPC, CORBA). |
+| `autodoc_list_socket_contracts` | Discovers Socket.io, WebSocket events, typed payloads, and WebRTC signals. |
+| `autodoc_export_documentation` | Exports living Diátaxis documentation (Tutorials, How-To, Reference, Architecture). |
 | `autodoc_generate_adr` | Synthesizes Architectural Decision Records in MADR Markdown format. |
 | `autodoc_purge_cache` | Purges and vacuums SQLite cache to comply with GDPR/LGPD. |
 

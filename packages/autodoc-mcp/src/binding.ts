@@ -18,6 +18,8 @@ export interface PingResponse {
 export interface NativeScanResult {
   totalFiles: number;
   totalLoc: number;
+  totalSymbols?: number;
+  totalEdges?: number;
   languages: string[];
   cachePath: string;
 }

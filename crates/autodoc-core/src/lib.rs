@@ -6,6 +6,7 @@ use tracing::{error, info};
 pub mod cache;
 pub mod errors;
 pub mod graph;
+pub mod parser;
 pub mod sanitizer;
 pub mod scanner;
 pub mod telemetry;
@@ -131,6 +132,8 @@ pub fn trigger_panic_test(reason: String) -> napi::Result<String> {
 pub struct NativeScanResult {
     pub total_files: u32,
     pub total_loc: u32,
+    pub total_symbols: u32,
+    pub total_edges: u32,
     pub languages: Vec<String>,
     pub cache_path: String,
 }
@@ -148,6 +151,8 @@ pub fn scan_repository_native(repo_path: String) -> napi::Result<NativeScanResul
         Ok(NativeScanResult {
             total_files: report.total_files as u32,
             total_loc: report.total_loc as u32,
+            total_symbols: report.total_symbols as u32,
+            total_edges: report.total_edges as u32,
             languages: report.scanned_languages,
             cache_path: storage.db_path().to_string_lossy().to_string(),
         })

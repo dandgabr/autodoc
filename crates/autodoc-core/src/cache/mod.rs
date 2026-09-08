@@ -38,6 +38,19 @@ pub enum StorageCommand {
         weight: f64,
         responder: Sender<Result<(), AutoDocError>>,
     },
+    InsertBatchAnalysis {
+        path: String,
+        mtime_ns: i64,
+        size_bytes: i64,
+        git_oid: String,
+        language: String,
+        symbols: Vec<crate::parser::ExtractedSymbol>,
+        responder: Sender<Result<(i64, usize), AutoDocError>>,
+    },
+    BulkResolveEdges {
+        edges: Vec<crate::parser::ExtractedEdge>,
+        responder: Sender<Result<usize, AutoDocError>>,
+    },
     CheckpointPassive {
         responder: Sender<Result<(), AutoDocError>>,
     },
@@ -147,6 +160,14 @@ impl StorageEngine {
                         }
                         StorageCommand::InsertEdge { caller_id, callee_id, edge_kind, weight, responder } => {
                             let res = Self::write_edge(&mut conn, caller_id, callee_id, &edge_kind, weight);
+                            let _ = responder.send(res);
+                        }
+                        StorageCommand::InsertBatchAnalysis { path, mtime_ns, size_bytes, git_oid, language, symbols, responder } => {
+                            let res = Self::write_batch_analysis(&mut conn, &path, mtime_ns, size_bytes, &git_oid, &language, &symbols);
+                            let _ = responder.send(res);
+                        }
+                        StorageCommand::BulkResolveEdges { edges, responder } => {
+                            let res = Self::write_bulk_edges(&mut conn, &edges);
                             let _ = responder.send(res);
                         }
                         StorageCommand::CheckpointPassive { responder } => {
@@ -265,6 +286,101 @@ impl StorageEngine {
         Ok(())
     }
 
+    fn write_batch_analysis(
+        conn: &mut Connection,
+        path: &str,
+        mtime_ns: i64,
+        size_bytes: i64,
+        git_oid: &str,
+        lang: &str,
+        symbols: &[crate::parser::ExtractedSymbol],
+    ) -> Result<(i64, usize), AutoDocError> {
+        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)
+            .map_err(|e| AutoDocError::StorageError { detail: e.to_string() })?;
+
+        let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_millis() as i64;
+        tx.execute(
+            r#"
+            INSERT INTO files (path, mtime_ns, size_bytes, git_oid, language, indexed_at)
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+            ON CONFLICT(path) DO UPDATE SET
+                mtime_ns = excluded.mtime_ns,
+                size_bytes = excluded.size_bytes,
+                git_oid = excluded.git_oid,
+                language = excluded.language,
+                indexed_at = excluded.indexed_at;
+            "#,
+            params![path, mtime_ns, size_bytes, git_oid, lang, now],
+        ).map_err(|e| AutoDocError::StorageError { detail: e.to_string() })?;
+
+        let file_id = tx.last_insert_rowid();
+
+        let mut inserted_symbols = 0;
+        for sym in symbols {
+            tx.execute(
+                r#"
+                INSERT INTO symbols (file_id, fqsn, name, kind, visibility, line_start, line_end, cyclomatic_complexity, signature_clean, docstring_clean)
+                VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
+                ON CONFLICT(fqsn) DO UPDATE SET
+                    file_id = excluded.file_id,
+                    name = excluded.name,
+                    kind = excluded.kind,
+                    visibility = excluded.visibility,
+                    line_start = excluded.line_start,
+                    line_end = excluded.line_end,
+                    cyclomatic_complexity = excluded.cyclomatic_complexity,
+                    signature_clean = excluded.signature_clean,
+                    docstring_clean = excluded.docstring_clean;
+                "#,
+                params![file_id, sym.fqsn, sym.name, sym.kind, sym.visibility, sym.line_start, sym.line_end, sym.complexity, sym.signature, sym.docstring.as_deref()],
+            ).map_err(|e| AutoDocError::StorageError { detail: e.to_string() })?;
+
+            let _ = tx.execute(
+                "INSERT INTO fts_symbols (fqsn, name, docstring_clean) VALUES (?1, ?2, ?3);",
+                params![sym.fqsn, sym.name, sym.docstring.as_deref().unwrap_or("")],
+            );
+            inserted_symbols += 1;
+        }
+
+        tx.commit().map_err(|e| AutoDocError::StorageError { detail: e.to_string() })?;
+        Ok((file_id, inserted_symbols))
+    }
+
+    fn write_bulk_edges(
+        conn: &mut Connection,
+        edges: &[crate::parser::ExtractedEdge],
+    ) -> Result<usize, AutoDocError> {
+        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)
+            .map_err(|e| AutoDocError::StorageError { detail: e.to_string() })?;
+
+        let mut inserted_edges = 0;
+        {
+            let mut stmt_find_caller = tx.prepare_cached("SELECT symbol_id FROM symbols WHERE fqsn = ?1 LIMIT 1")
+                .map_err(|e| AutoDocError::StorageError { detail: e.to_string() })?;
+            let mut stmt_find_callee = tx.prepare_cached("SELECT symbol_id FROM symbols WHERE name = ?1 LIMIT 1")
+                .map_err(|e| AutoDocError::StorageError { detail: e.to_string() })?;
+            let mut stmt_insert_edge = tx.prepare_cached(
+                "INSERT INTO edges (caller_id, callee_id, edge_kind, weight) VALUES (?1, ?2, ?3, ?4) ON CONFLICT(caller_id, callee_id, edge_kind) DO UPDATE SET weight = excluded.weight"
+            ).map_err(|e| AutoDocError::StorageError { detail: e.to_string() })?;
+
+            for edge in edges {
+                let caller_id: Option<i64> = stmt_find_caller.query_row(params![edge.caller_fqsn], |r| r.get(0)).ok();
+                let callee_id: Option<i64> = stmt_find_callee.query_row(params![edge.callee_name], |r| r.get(0)).ok();
+
+                if let (Some(caller), Some(callee)) = (caller_id, callee_id) {
+                    if caller != callee
+                        && stmt_insert_edge.execute(params![caller, callee, edge.edge_kind, edge.weight]).is_ok()
+                    {
+                        inserted_edges += 1;
+                    }
+                }
+            }
+        }
+
+        tx.commit().map_err(|e| AutoDocError::StorageError { detail: e.to_string() })?;
+        Ok(inserted_edges)
+    }
+
     pub fn insert_file(&self, path: &str, mtime_ns: i64, size_bytes: i64, git_oid: &str, lang: &str) -> Result<i64, AutoDocError> {
         let (tx, rx) = channel();
         self.writer_sender.send(StorageCommand::InsertFile {
@@ -318,6 +434,39 @@ impl StorageEngine {
             callee_id,
             edge_kind: edge_kind.to_string(),
             weight,
+            responder: tx,
+        }).map_err(|e| AutoDocError::Internal(e.to_string()))?;
+
+        rx.recv().map_err(|e| AutoDocError::Internal(e.to_string()))?
+    }
+
+    pub fn insert_batch_analysis(
+        &self,
+        path: &str,
+        mtime_ns: i64,
+        size_bytes: i64,
+        git_oid: &str,
+        lang: &str,
+        symbols: Vec<crate::parser::ExtractedSymbol>,
+    ) -> Result<(i64, usize), AutoDocError> {
+        let (tx, rx) = channel();
+        self.writer_sender.send(StorageCommand::InsertBatchAnalysis {
+            path: path.to_string(),
+            mtime_ns,
+            size_bytes,
+            git_oid: git_oid.to_string(),
+            language: lang.to_string(),
+            symbols,
+            responder: tx,
+        }).map_err(|e| AutoDocError::Internal(e.to_string()))?;
+
+        rx.recv().map_err(|e| AutoDocError::Internal(e.to_string()))?
+    }
+
+    pub fn bulk_resolve_edges(&self, edges: Vec<crate::parser::ExtractedEdge>) -> Result<usize, AutoDocError> {
+        let (tx, rx) = channel();
+        self.writer_sender.send(StorageCommand::BulkResolveEdges {
+            edges,
             responder: tx,
         }).map_err(|e| AutoDocError::Internal(e.to_string()))?;
 

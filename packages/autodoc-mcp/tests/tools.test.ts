@@ -14,9 +14,9 @@ describe("AutoDoc MCP Tools Handlers & Schemas", () => {
     tools = new AutoDocTools(binding, i18n);
   });
 
-  it("should have schemas for all 7 registered MCP tools", () => {
+  it("should have schemas for all registered MCP tools", () => {
     const definitions = tools.getToolDefinitions();
-    expect(definitions.length).toBe(7);
+    expect(definitions.length).toBe(9);
 
     const names = definitions.map((d) => d.name);
     expect(names).toContain("autodoc_scan_repository");
@@ -24,6 +24,8 @@ describe("AutoDoc MCP Tools Handlers & Schemas", () => {
     expect(names).toContain("autodoc_get_symbol_contract");
     expect(names).toContain("autodoc_trace_data_flow");
     expect(names).toContain("autodoc_list_api_contracts");
+    expect(names).toContain("autodoc_list_socket_contracts");
+    expect(names).toContain("autodoc_export_documentation");
     expect(names).toContain("autodoc_generate_adr");
     expect(names).toContain("autodoc_purge_cache");
   });
@@ -93,12 +95,34 @@ describe("AutoDoc MCP Tools Handlers & Schemas", () => {
 
   it("should execute autodoc_list_api_contracts", async () => {
     const res = await tools.handleListApiContracts({
-      protocolFilter: "all"
+      protocolFilter: "ALL"
     });
 
     expect(res).toBeDefined();
     expect(res.protocolsSupported).toBeDefined();
     expect(res.protocolsSupported.length).toBeGreaterThanOrEqual(7);
+    expect(res.contracts.length).toBeGreaterThan(0);
+  });
+
+  it("should execute autodoc_list_socket_contracts", async () => {
+    const res = await tools.handleListSocketContracts({
+      directionFilter: "ALL",
+      limit: 50
+    });
+
+    expect(res).toBeDefined();
+    expect(res.protocolsSupported).toContain("SOCKET_IO");
+    expect(res.contracts.length).toBeGreaterThan(0);
+  });
+
+  it("should execute autodoc_export_documentation", async () => {
+    const res = await tools.handleExportDocumentation({
+      outputDir: "/tmp/autodoc_test_docs"
+    });
+
+    expect(res).toBeDefined();
+    expect(res.status).toBe("SUCCESS");
+    expect(res.filesGenerated).toBeGreaterThan(0);
   });
 
   it("should execute autodoc_generate_adr", async () => {
