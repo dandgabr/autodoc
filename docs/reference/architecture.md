@@ -10,24 +10,23 @@ AutoDoc employs a two-tier architecture:
 1. **TypeScript MCP Layer (`packages/autodoc-mcp`)**: Implements the Model Context Protocol JSON-RPC 2.0 lifecycle over `stdio`, schema validation via Zod, and output formatting.
 2. **Rust Core Engine (`crates/autodoc-core`)**: Handles compute-intensive operations (tree traversal, string interning, graph algorithms, and SQLite storage) exposed via NAPI-RS native bindings.
 
-```
-┌─────────────────────────────────────────────────────────────┐
-│                 AI Agent Harness (Client)                   │
-│          (Claude Desktop, Antigravity, OpenCode)            │
-└──────────────────────────────┬──────────────────────────────┘
-                               │ JSON-RPC 2.0 over stdio
-┌──────────────────────────────▼──────────────────────────────┐
-│            @autodoc/mcp Server (Node.js / TS)               │
-│  - Stdio Transport          - Output Sanitization (XSS)     │
-│  - 7 Tool Handlers (Zod)    - i18n & Syntax Masking         │
-└──────────────────────────────┬──────────────────────────────┘
-                               │ Node-API FFI (catch_unwind)
-┌──────────────────────────────▼──────────────────────────────┐
-│           @autodoc/core Engine (Rust 2021 / NAPI-RS)        │
-│  - Rayon Scanner             - Lasso String Interning       │
-│  - SQLite WAL (r2d2_sqlite)  - Petgraph (CompactNode POD)   │
-│  - Shannon Entropy Engine    - Modular PII Registry         │
-└─────────────────────────────────────────────────────────────┘
+```mermaid
+C4Container
+    title AutoDoc High-Level System Topology
+
+    Person(developer, "Developer / User", "Queries codebase architecture")
+    System_Ext(agent, "AI Agent Harness (Client)", "Claude Desktop, Antigravity, OpenCode, Cursor")
+
+    Container_Boundary(b1, "AutoDoc MCP System") {
+        Container(mcp_server, "@autodoc/mcp Server", "Node.js / TypeScript", "Stdio transport, 7 tool handlers, Zod schema validation, output XSS sanitization, and i18n")
+        Container(core_engine, "@autodoc/core Engine", "Rust 2021 / NAPI-RS", "Parallel Rayon scanner, Petgraph, Lasso string interning, Shannon entropy & PII defense")
+        ContainerDb(storage, "Storage Engine", "SQLite WAL", "High-throughput persistence with r2d2_sqlite connection pool and covering indexes")
+    }
+
+    Rel(developer, agent, "Prompts architectural queries")
+    Rel(agent, mcp_server, "JSON-RPC 2.0 over stdio")
+    Rel(mcp_server, core_engine, "Node-API FFI", "catch_unwind boundary")
+    Rel(core_engine, storage, "Persists files, symbols, and edges", "WAL mode")
 ```
 
 ---
