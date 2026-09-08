@@ -178,8 +178,12 @@ Comprehensive documentation adhering to the **Diátaxis Framework** is available
   - [Configure and Extend PII Scrubbing](docs/how-to/configure-pii-scrubbing.md)
   - [Add Custom Locales](docs/how-to/custom-locales.md)
 - **Reference**:
+  - [MCP Protocol & Tool Contracts](docs/reference/mcp-contracts.md)
+  - [Internal APIs & Node-API FFI](docs/reference/internal-apis.md)
+  - [Functions & Symbol Catalog](docs/reference/functions-reference.md)
   - [MCP Tools Specification](docs/reference/tools.md)
   - [System Architecture Specification](docs/reference/architecture.md)
+  - [Self-Mapped Codebase Topology (C1-C4)](docs/reference/codebase-map.md)
   - [Open-Source Licensing and Compliance](docs/reference/licensing.md)
 - **Explanation**:
   - [Why Rust and TypeScript?](docs/explanation/hybrid-architecture.md)
