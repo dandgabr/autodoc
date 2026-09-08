@@ -216,3 +216,18 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# ai-memory local configuration
+.ai-memory.toml
+
+# AutoDoc internal cache and index
+.autodoc/
+
+# Node & npm
+node_modules/
+dist/
+*.tsbuildinfo
+
+# Rust & Cargo build artifacts
+/target/
+*.node

@@ -1,0 +1,33 @@
+{
+  "name": "@autodoc/core",
+  "version": "0.1.0",
+  "description": "AutoDoc Core Engine \u2014 High-performance Rust native engine via NAPI-RS",
+  "main": "index.js",
+  "types": "index.d.ts",
+  "files": [
+    "index.js",
+    "index.d.ts",
+    "*.node"
+  ],
+  "scripts": {
+    "build": "napi build --platform --release",
+    "build:debug": "napi build --platform",
+    "test": "cargo test"
+  },
+  "license": "MIT",
+  "napi": {
+    "name": "autodoc-core",
+    "triples": {
+      "default": true,
+      "additional": [
+        "x86_64-unknown-linux-gnu",
+        "x86_64-apple-darwin",
+        "aarch64-apple-darwin",
+        "x86_64-pc-windows-msvc"
+      ]
+    }
+  },
+  "devDependencies": {
+    "@napi-rs/cli": "^3.0.0-alpha.72"
+  }
+}

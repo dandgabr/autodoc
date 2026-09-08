@@ -1,0 +1,30 @@
+{
+  "name": "autodoc-monorepo",
+  "version": "0.1.0",
+  "private": true,
+  "description": "AutoDoc Code Explorer MCP Server \u2014 Intelligent Codebase Mapping and Architecture Documentation",
+  "license": "MIT",
+  "author": "Daniel Gon\u00e7alves Araujo",
+  "engines": {
+    "node": ">=22.0.0",
+    "npm": ">=10.0.0"
+  },
+  "workspaces": [
+    "crates/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "build": "npm run build --workspaces",
+    "build:core": "npm run build -w @autodoc/core",
+    "build:mcp": "npm run build -w @autodoc/mcp",
+    "test": "npm run test --workspaces",
+    "test:bridge": "npm run test -w @autodoc/mcp",
+    "check:licenses": "license-checker-rseidelsohn --excludePackages \"autodoc-monorepo@0.1.0\" --onlyAllow \"MIT;Apache-2.0;BSD-2-Clause;BSD-3-Clause;ISC;0BSD;CC0-1.0;Unlicense;Python-2.0;BlueOak-1.0.0;CC-BY-3.0\" --summary"
+  },
+  "devDependencies": {
+    "@napi-rs/cli": "^3.0.0-alpha.72",
+    "license-checker-rseidelsohn": "^4.4.2",
+    "typescript": "^5.7.3",
+    "vitest": "^3.0.7"
+  }
+}

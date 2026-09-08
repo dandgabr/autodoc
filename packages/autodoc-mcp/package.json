@@ -1,0 +1,25 @@
+{
+  "name": "@autodoc/mcp",
+  "version": "0.1.0",
+  "description": "AutoDoc MCP Server \u2014 Model Context Protocol Server for Codebase Architecture & Documentation",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "license": "MIT",
+  "author": "Daniel Gon\u00e7alves Araujo",
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@autodoc/core": "*",
+    "@modelcontextprotocol/sdk": "^1.29.0",
+    "zod": "^3.24.2"
+  },
+  "devDependencies": {
+    "@types/node": "^22.13.9",
+    "typescript": "^5.7.3",
+    "vitest": "^3.0.7"
+  }
+}
