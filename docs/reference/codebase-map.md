@@ -15,39 +15,66 @@ This document presents the self-mapped architectural topology of the AutoDoc rep
 
 ---
 
-## System Context Diagram (C4 Level 1)
+## System Context Diagram (Level 1)
  
 ```mermaid
-C4Context
-    title AutoDoc Self-Mapped System Context
+flowchart TD
+    %% High Contrast Styling Definitions
+    classDef clientClass fill:#1E293B,stroke:#0EA5E9,stroke-width:2px,color:#FFFFFF,font-weight:bold;
+    classDef systemClass fill:#0F172A,stroke:#38BDF8,stroke-width:2px,color:#FFFFFF,font-weight:bold;
 
-    Person(developer, "Developer / Engineer", "Interacts with coding assistant or CLI.")
-    System(autodoc, "AutoDoc System", "Code intelligence, architecture mapping, and C4 diagram generation.")
-    System_Ext(agent, "AI Agent Harness", "Claude Desktop, Cursor, Antigravity, OpenCode")
+    subgraph Users["👤 User & Client Environment"]
+        Dev["fa:fa-user Developer / Engineer<br/><small>Interacts via CLI or AI Chat Interface</small>"]:::clientClass
+        Harness["🤖 AI Agent Harness<br/><small>Claude Desktop • Cursor • Antigravity • OpenCode</small>"]:::clientClass
+    end
 
-    Rel(developer, agent, "Requests codebase analysis")
-    Rel(agent, autodoc, "Invokes MCP tools over stdio", "JSON-RPC 2.0")
+    subgraph SystemBoundary["⚡ Core System Context"]
+        AutoDoc["🔌 AutoDoc System<br/><small>Code intelligence, architecture mapping, and C4 diagram generation</small>"]:::systemClass
+    end
+
+    Dev -->|"Requests codebase analysis"| Harness
+    Harness -->|"Invokes MCP tools over stdio (JSON-RPC 2.0)"| AutoDoc
+
+    linkStyle default stroke:#94A3B8,stroke-width:2px;
 ```
 
 ---
 
-## Container Architecture (C4 Level 2)
+## Container Architecture (Level 2)
 
 ```mermaid
-C4Container
-    title AutoDoc Internal Container Architecture
+flowchart TD
+    %% High Contrast Styling Definitions
+    classDef clientClass fill:#1E293B,stroke:#0EA5E9,stroke-width:2px,color:#FFFFFF,font-weight:bold;
+    classDef mcpClass fill:#1E1B4B,stroke:#818CF8,stroke-width:2px,color:#FFFFFF;
+    classDef rustClass fill:#311505,stroke:#FB923C,stroke-width:2px,color:#FFFFFF;
+    classDef dbClass fill:#064E3B,stroke:#34D399,stroke-width:2px,color:#FFFFFF;
 
-    System_Ext(agent, "AI Agent Harness", "Claude, Cursor, OpenCode, Antigravity")
+    subgraph ExternalClients["👤 AI Agent Harness"]
+        Agent["🤖 AI Agent Harness (Client)<br/><small>Claude • Cursor • OpenCode • Antigravity</small>"]:::clientClass
+    end
 
-    Container_Boundary(b1, "AutoDoc Code Explorer") {
-        Container(mcp_server, "@autodoc/mcp Server", "Node.js / TypeScript", "Handles tool requests, validates schemas, formats C4 diagrams and ADRs")
-        Container(core_engine, "@autodoc/core Engine", "Rust 2021 / Rayon", "Multi-threaded file discovery, Lasso interning, Petgraph pruning")
-        ContainerDb(sqlite_db, "SQLite WAL Storage", "SQLite 3", "Caches AST symbols, edges, and file metadata")
-    }
+    subgraph AutoDocContainers["⚡ AutoDoc Code Explorer Container Boundary"]
+        direction TB
 
-    Rel(agent, mcp_server, "Dispatches tool calls", "stdio")
-    Rel(mcp_server, core_engine, "Calls native bindings", "Node-API FFI")
-    Rel(core_engine, sqlite_db, "Stores and retrieves index", "r2d2_sqlite / WAL")
+        subgraph MCPLayer["Node.js / TypeScript Host"]
+            MCPServer["🔌 @autodoc/mcp Server<br/><small>Handles tool requests, validates schemas, formats diagrams & ADRs</small>"]:::mcpClass
+        end
+
+        subgraph CoreLayer["Rust Native Engine"]
+            CoreEngine["🦀 @autodoc/core Engine<br/><small>Multi-threaded Rayon file discovery, Lasso interning, Petgraph pruning</small>"]:::rustClass
+        end
+
+        subgraph DBStorage["Persistence Layer"]
+            SQLiteDB[("💾 SQLite WAL Storage (.autodoc/cache.db)<br/><small>Caches AST symbols, call edges, and file metadata</small>")]:::dbClass
+        end
+    end
+
+    Agent -->|"Dispatches tool calls via stdio"| MCPServer
+    MCPServer -->|"Calls native routines via Node-API FFI"| CoreEngine
+    CoreEngine -->|"Stores and retrieves index (r2d2_sqlite / WAL)"| SQLiteDB
+
+    linkStyle default stroke:#94A3B8,stroke-width:2px;
 ```
 
 ---
