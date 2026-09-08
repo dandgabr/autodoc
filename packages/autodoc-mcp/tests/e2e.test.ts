@@ -28,7 +28,7 @@ describe("AutoDoc E2E System Integration Test", () => {
     expect(scanResult.status).toBe("SUCCESS");
     expect(scanResult.scannedFiles).toBeGreaterThan(0);
     expect(scanResult.piiScrubbed).toBe(true);
-    expect(scanResult.cacheLocation).toBe(".autodoc/cache.db");
+    expect(scanResult.cacheLocation).toContain(".autodoc/cache.db");
   });
 
   it("Step 2: should generate C4 Level 1 and Level 2 diagrams without XSS vulnerabilities", async () => {

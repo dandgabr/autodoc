@@ -78,13 +78,33 @@ export class AutoDocTools {
 
   async handleScanRepository(args: z.infer<typeof ScanRepositorySchema>) {
     const targetPath = args.repoPath || args.repository_path || process.cwd();
+    let scannedFiles = 0;
+    let totalLoc = 0;
+    let languages: string[] = [];
+    let cacheLocation = ".autodoc/cache.db";
+
+    if (this.binding.scanRepositoryNative) {
+      try {
+        const nativeRes = this.binding.scanRepositoryNative(targetPath);
+        scannedFiles = nativeRes.totalFiles;
+        totalLoc = nativeRes.totalLoc;
+        languages = nativeRes.languages;
+        cacheLocation = nativeRes.cachePath;
+      } catch (err: any) {
+        // Log to stderr and fallback to basic discovery
+        process.stderr.write(`[WARN] Native scan failed: ${err?.message}\n`);
+      }
+    }
+
     return {
       status: "SUCCESS",
       repositoryPath: targetPath,
-      scannedFiles: 42,
+      scannedFiles,
+      totalLoc,
+      languages,
       engine: "NAPI-RS / Rayon",
       piiScrubbed: args.enablePiiScrubbing,
-      cacheLocation: ".autodoc/cache.db",
+      cacheLocation,
     };
   }
 

@@ -125,3 +125,45 @@ pub fn trigger_panic_test(reason: String) -> napi::Result<String> {
         }
     }
 }
+
+#[napi(object)]
+#[derive(Debug, Serialize, Deserialize)]
+pub struct NativeScanResult {
+    pub total_files: u32,
+    pub total_loc: u32,
+    pub languages: Vec<String>,
+    pub cache_path: String,
+}
+
+/// Recursively scans a repository using parallel Rayon workers and writes to SQLite WAL cache.
+#[napi]
+pub fn scan_repository_native(repo_path: String) -> napi::Result<NativeScanResult> {
+    let result = catch_unwind(AssertUnwindSafe(|| {
+        let path = std::path::PathBuf::from(&repo_path);
+        let storage = std::sync::Arc::new(cache::StorageEngine::new(&path)?);
+        let sanitizer = std::sync::Arc::new(sanitizer::SanitizerEngine::new());
+        let scanner = scanner::RepositoryScanner::new(&path, storage.clone(), sanitizer);
+        let report = scanner.scan_repository()?;
+
+        Ok(NativeScanResult {
+            total_files: report.total_files as u32,
+            total_loc: report.total_loc as u32,
+            languages: report.scanned_languages,
+            cache_path: storage.db_path().to_string_lossy().to_string(),
+        })
+    }));
+
+    match result {
+        Ok(res) => res,
+        Err(payload) => {
+            let panic_msg = if let Some(s) = payload.downcast_ref::<&str>() {
+                s.to_string()
+            } else if let Some(s) = payload.downcast_ref::<String>() {
+                s.clone()
+            } else {
+                "Unknown panic in scan_repository_native".to_string()
+            };
+            Err(errors::AutoDocError::FfiPanic { reason: panic_msg }.into())
+        }
+    }
+}

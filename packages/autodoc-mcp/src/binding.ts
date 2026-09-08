@@ -15,12 +15,20 @@ export interface PingResponse {
   timestampMs: number;
 }
 
+export interface NativeScanResult {
+  totalFiles: number;
+  totalLoc: number;
+  languages: string[];
+  cachePath: string;
+}
+
 export interface NativeBinding {
   initLogger(): void;
   ping(traceId: string): PingResponse;
   triggerPanicTest(reason: string): string;
   sanitizeContent?(content: string): { sanitizedText: string; redactionCount: number };
   wrapUntrusted?(content: string, origin: string, file: string, symbol: string): string;
+  scanRepositoryNative?(repoPath: string): NativeScanResult;
 }
 
 /**
