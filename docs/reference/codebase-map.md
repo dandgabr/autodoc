@@ -7,7 +7,7 @@ This document presents the self-mapped architectural topology of the AutoDoc rep
 ## Repository Metrics
 
 - **Total Source Files Scanned**: 35 (excluding ignored directories, tests artifacts, and third-party dependencies)
-- **Total Lines of Code (LOC)**: ~3,192 LOC
+- **Total Lines of Code (LOC)**: ~3,253 LOC
 - **Primary Languages**: Rust (`rs`), TypeScript (`ts`)
 - **Engine**: NAPI-RS / Rayon Work-Stealing Multi-Threading
 - **Cache Location**: `.autodoc/cache.db` (SQLite in WAL mode)

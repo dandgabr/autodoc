@@ -20,10 +20,12 @@ Discovers repository structure, polyglot languages, manifests, and LOC metrics u
 {
   "status": "SUCCESS",
   "repositoryPath": "/path/to/repo",
-  "scannedFiles": 42,
+  "scannedFiles": 35,
+  "totalLoc": 3253,
+  "languages": ["rs", "ts"],
   "engine": "NAPI-RS / Rayon",
   "piiScrubbed": true,
-  "cacheLocation": ".autodoc/cache.db"
+  "cacheLocation": "/path/to/repo/.autodoc/cache.db"
 }
 ```
 
