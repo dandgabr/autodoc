@@ -28,6 +28,8 @@ import {
   handlePurgeCache,
 } from "./tools/handlers.js";
 import { loadNativeBinding } from "./binding.js";
+export { WorkspaceAnalyzer } from "./analyzers/workspace.js";
+export { ContainerInfraAnalyzer } from "./analyzers/containers.js";
 
 export function createServer(): Server {
   const server = new Server(
@@ -63,6 +65,7 @@ export function createServer(): Server {
           inputSchema: {
             type: "object",
             properties: {
+              repository_path: { type: "string", description: "Target repository path (optional, defaults to last scanned path or cwd)." },
               level: { type: "number", description: "C4 model level (1: Context, 2: Container, 3: Component, 4: Code). Default: 2." },
               max_nodes: { type: "number", description: "Maximum visible nodes to prevent LLM context exhaustion (10-100). Default: 35." },
               format: { type: "string", enum: ["mermaid", "structurizr"], description: "Output diagram format. Default: mermaid." },
@@ -76,6 +79,7 @@ export function createServer(): Server {
           inputSchema: {
             type: "object",
             properties: {
+              repository_path: { type: "string", description: "Target repository path (optional, defaults to last scanned path or cwd)." },
               symbol_fqsn: { type: "string", description: "Fully Qualified Symbol Name (e.g. crate::module::function)." },
               include_body: { type: "boolean", description: "Whether to include full AST body. Default: false." },
             },
@@ -88,6 +92,7 @@ export function createServer(): Server {
           inputSchema: {
             type: "object",
             properties: {
+              repository_path: { type: "string", description: "Target repository path (optional, defaults to last scanned path or cwd)." },
               entrypoint_symbol: { type: "string", description: "Source entrypoint symbol." },
               max_depth: { type: "number", description: "Maximum traversal depth in call graph." },
             },
@@ -100,6 +105,7 @@ export function createServer(): Server {
           inputSchema: {
             type: "object",
             properties: {
+              repository_path: { type: "string", description: "Target repository path (optional, defaults to last scanned path or cwd)." },
               protocol_filter: { type: "string", enum: ["ALL", "REST", "SOAP", "GRPC", "GRAPHQL", "CORBA"] },
               limit: { type: "number", description: "Pagination limit. Default: 50." },
               cursor: { type: "string", description: "Next page cursor." },
@@ -112,6 +118,7 @@ export function createServer(): Server {
           inputSchema: {
             type: "object",
             properties: {
+              repository_path: { type: "string", description: "Target repository path (optional, defaults to last scanned path or cwd)." },
               direction_filter: { type: "string", enum: ["ALL", "CLIENT_TO_SERVER", "SERVER_TO_CLIENT", "BIDIRECTIONAL"] },
               limit: { type: "number", description: "Pagination limit. Default: 50." },
             },
@@ -123,6 +130,7 @@ export function createServer(): Server {
           inputSchema: {
             type: "object",
             properties: {
+              repository_path: { type: "string", description: "Target repository path (optional, defaults to last scanned path or cwd)." },
               output_dir: { type: "string", description: "Target directory path on disk (e.g. ./docs)." },
             },
           },

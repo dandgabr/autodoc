@@ -1,5 +1,5 @@
-import { readFileSync, readdirSync, statSync } from "node:fs";
-import { join, extname } from "node:path";
+import { readFileSync, readdirSync, statSync, existsSync } from "node:fs";
+import { join, extname, basename } from "node:path";
 
 export interface DataField {
   name: string;
@@ -7,16 +7,27 @@ export interface DataField {
   required?: boolean;
   indexed?: boolean;
   defaultValue?: string;
+  ref?: string;
+}
+
+export interface CompoundIndex {
+  fields: Record<string, number>;
+  unique?: boolean;
+  partialFilterExpression?: string;
 }
 
 export interface DataModelContract {
   modelName: string;
   collectionOrTable: string;
   fields: DataField[];
+  compoundIndexes?: CompoundIndex[];
   sourceFile: string;
-  framework: "Mongoose" | "Prisma" | "JPA/Hibernate" | "TypeORM" | "SQL";
+  framework: "Mongoose" | "Prisma" | "SQLAlchemy" | "JPA/Hibernate" | "TypeORM" | "EFCore" | "GORM" | "SeaORM" | "SQL";
   hasSoftDelete: boolean;
   hasTimestamps: boolean;
+  isDiscriminator?: boolean;
+  baseModel?: string;
+  discriminatorKey?: string;
 }
 
 export interface DomainRuleContract {
@@ -33,91 +44,77 @@ export class SchemaAnalyzer {
     this.repoPath = repoPath;
   }
 
-  public discoverModels(limit: number = 50): DataModelContract[] {
-    const models: DataModelContract[] = [];
+  public discoverModels(limit: number = 100): DataModelContract[] {
+    const models: Map<string, DataModelContract> = new Map();
     const sourceFiles = this.findSourceFiles(this.repoPath);
 
     for (const file of sourceFiles) {
-      if (models.length >= limit) break;
       const content = readFileSync(file, "utf-8");
       const relPath = this.toRelative(file);
+      const ext = extname(file);
 
-      // 1. Mongoose Schema discovery
-      if (content.includes("Schema(") || content.includes("new Schema")) {
-        const schemaRegex = /(?:const|let|var)\s+([a-zA-Z0-9_]+Schema)\s*=\s*new\s+Schema\s*\(\s*\{([^}]+)\}/g;
-        let match;
-        while ((match = schemaRegex.exec(content)) !== null) {
-          const schemaName = match[1];
-          const modelName = schemaName.replace(/Schema$/i, "");
-          const fields = this.parseMongooseFields(match[2]);
-
-          models.push({
-            modelName,
-            collectionOrTable: modelName.toLowerCase() + "s",
-            fields,
-            sourceFile: relPath,
-            framework: "Mongoose",
-            hasSoftDelete: /softDelete|deletedAt|isDeleted/i.test(content),
-            hasTimestamps: /timestamps:\s*true/i.test(content),
-          });
-        }
+      // 1. Mongoose Schemas, Models & Discriminators
+      if (content.includes("Schema") || content.includes("mongoose") || content.includes("discriminator")) {
+        this.extractMongooseModels(content, relPath, models);
       }
 
-      // 2. Prisma Schema discovery
-      if (file.endsWith(".prisma")) {
-        const modelRegex = /model\s+([a-zA-Z0-9_]+)\s*\{([^}]+)\}/g;
-        let match;
-        while ((match = modelRegex.exec(content)) !== null) {
-          const modelName = match[1];
-          const fields = this.parsePrismaFields(match[2]);
+      // 2. Prisma Schemas
+      if (ext === ".prisma") {
+        this.extractPrismaModels(content, relPath, models);
+      }
 
-          models.push({
-            modelName,
-            collectionOrTable: modelName.toLowerCase(),
-            fields,
-            sourceFile: relPath,
-            framework: "Prisma",
-            hasSoftDelete: /deletedAt/i.test(match[2]),
-            hasTimestamps: /createdAt|updatedAt/i.test(match[2]),
-          });
-        }
+      // 3. Python SQLAlchemy / Django
+      if (ext === ".py" && (content.includes("Base") || content.includes("models.Model") || content.includes("__tablename__"))) {
+        this.extractPythonModels(content, relPath, models);
+      }
+
+      // 4. TypeORM / MikroORM
+      if ((ext === ".ts" || ext === ".js") && content.includes("@Entity")) {
+        this.extractTypeOrmModels(content, relPath, models);
+      }
+
+      // 5. Java / Kotlin JPA Hibernate
+      if ((ext === ".java" || ext === ".kt") && (content.includes("@Entity") || content.includes("@Table"))) {
+        this.extractJpaModels(content, relPath, models);
+      }
+
+      // 6. C# EF Core
+      if (ext === ".cs" && (content.includes("DbContext") || content.includes("[Table") || content.includes("HasDiscriminator"))) {
+        this.extractEfCoreModels(content, relPath, models);
+      }
+
+      // 7. Go GORM / Ent
+      if (ext === ".go" && (content.includes("gorm.Model") || content.includes("`gorm:"))) {
+        this.extractGormModels(content, relPath, models);
       }
     }
 
-    if (models.length === 0) {
-      models.push(
-        {
-          modelName: "User",
-          collectionOrTable: "users",
-          fields: [
-            { name: "id", type: "String", required: true, indexed: true },
-            { name: "username", type: "String", required: true, indexed: true },
-            { name: "walletBalance", type: "Number", required: true },
-            { name: "createdAt", type: "Date" },
-          ],
-          sourceFile: "models/User.ts",
-          framework: "Mongoose",
-          hasSoftDelete: false,
-          hasTimestamps: true,
-        },
-        {
-          modelName: "GameSession",
-          collectionOrTable: "gamesessions",
-          fields: [
-            { name: "sessionId", type: "String", required: true, indexed: true },
-            { name: "gameType", type: "String", required: true },
-            { name: "status", type: "String", required: true },
-            { name: "totalBets", type: "Number" },
-          ],
-          sourceFile: "models/GameSession.ts",
-          framework: "Mongoose",
-          hasSoftDelete: true,
-          hasTimestamps: true,
+    const normalized: Map<string, DataModelContract> = new Map();
+    for (const [name, model] of models.entries()) {
+      const lower = name.toLowerCase();
+      const existing = normalized.get(lower);
+      if (!existing) {
+        normalized.set(lower, { ...model });
+      } else {
+        if (/^[A-Z]/.test(model.modelName) && !/^[A-Z]/.test(existing.modelName)) {
+          existing.modelName = model.modelName;
+          existing.collectionOrTable = model.collectionOrTable;
         }
-      );
+        if (model.fields.length > existing.fields.length) {
+          existing.fields = model.fields;
+        }
+        if (model.compoundIndexes && model.compoundIndexes.length > 0) {
+          existing.compoundIndexes = [...(existing.compoundIndexes || []), ...model.compoundIndexes];
+        }
+        if (model.isDiscriminator) existing.isDiscriminator = true;
+        if (model.hasSoftDelete) existing.hasSoftDelete = true;
+        if (model.hasTimestamps) existing.hasTimestamps = true;
+      }
     }
 
-    return models.slice(0, limit);
+    const list = Array.from(normalized.values());
+    list.sort((a, b) => a.modelName.localeCompare(b.modelName));
+    return list.slice(0, limit);
   }
 
   public discoverDomainRules(): DomainRuleContract[] {
@@ -128,33 +125,138 @@ export class SchemaAnalyzer {
       const content = readFileSync(file, "utf-8");
       const relPath = this.toRelative(file);
 
-      // State machines (enum or transitions)
-      if (/GameStatus|GameState|SessionState|StateMachine/i.test(content)) {
-        const enumMatch = /(?:enum|type)\s+([a-zA-Z0-9_]+(?:Status|State|Phase))\s*=?\s*\{?([^};]+)\}?/g;
+      if (/Status|State|Phase|StateMachine|Transition/i.test(content)) {
+        const enumMatch = /(?:export\s+)?(?:enum|type)\s+([a-zA-Z0-9_]+(?:Status|State|Phase))\s*=?\s*\{?([^};]+)\}?/g;
         let match;
         while ((match = enumMatch.exec(content)) !== null) {
           const domain = match[1];
-          const rawStates = match[2].split(/[,\n|]/).map((s) => s.trim().replace(/['"=\d]/g, "")).filter(Boolean);
+          const rawStates = match[2]
+            .split(/[,\n|]/)
+            .map((s) => s.trim().replace(/['"=\d]/g, "").trim())
+            .filter((s) => s.length > 0 && !s.startsWith("//"));
 
-          const stateTransitions = [];
-          for (let i = 0; i < rawStates.length - 1; i++) {
-            stateTransitions.push({
-              from: rawStates[i],
-              to: rawStates[i + 1],
-              event: `TRANSITION_TO_${rawStates[i + 1].toUpperCase()}`,
+          if (rawStates.length > 1) {
+            const stateTransitions = [];
+            for (let i = 0; i < rawStates.length - 1; i++) {
+              stateTransitions.push({
+                from: rawStates[i],
+                to: rawStates[i + 1],
+                event: `TRANSITION_TO_${rawStates[i + 1].toUpperCase()}`,
+              });
+            }
+
+            rules.push({
+              domain,
+              stateTransitions,
+              sourceFile: relPath,
             });
           }
-
-          rules.push({
-            domain,
-            stateTransitions,
-            sourceFile: relPath,
-          });
         }
       }
     }
 
     return rules;
+  }
+
+  private extractMongooseModels(content: string, relPath: string, out: Map<string, DataModelContract>) {
+    // 1. Standard Schemas: const FooSchema = new Schema({ ... }, { timestamps: true })
+    const schemaRegex = /(?:const|let|var|export\s+const)\s+([a-zA-Z0-9_]+Schema)\s*=\s*new\s+(?:mongoose\.)?Schema(?:<[^>]+>)?\s*\(\s*\{([^}]+)\}(?:,\s*\{([^}]+)\})?/g;
+    let match;
+    while ((match = schemaRegex.exec(content)) !== null) {
+      const rawSchemaName = match[1];
+      const modelName = rawSchemaName.replace(/Schema$/i, "");
+      const schemaBody = match[2];
+      const schemaOpts = match[3] || "";
+
+      const fields = this.parseMongooseFields(schemaBody);
+      const hasTimestamps = /timestamps:\s*true/i.test(schemaOpts) || /timestamps:\s*true/i.test(content);
+      const hasSoftDelete = /softDeletePlugin|deletedAt|isDeleted/i.test(content);
+      const compoundIndexes = this.parseCompoundIndexes(content);
+
+      out.set(modelName, {
+        modelName,
+        collectionOrTable: modelName.toLowerCase() + "s",
+        fields,
+        compoundIndexes,
+        sourceFile: relPath,
+        framework: "Mongoose",
+        hasSoftDelete,
+        hasTimestamps,
+      });
+    }
+
+    // 2. Mongoose models directly: mongoose.model('ModelName', schema)
+    const modelCallRegex = /(?:mongoose\.)?model(?:<[^>]+>)?\s*\(\s*['"`]([^'"`]+)['"`]/g;
+    while ((match = modelCallRegex.exec(content)) !== null) {
+      const modelName = match[1];
+      if (!out.has(modelName)) {
+        out.set(modelName, {
+          modelName,
+          collectionOrTable: modelName.toLowerCase() + "s",
+          fields: [],
+          sourceFile: relPath,
+          framework: "Mongoose",
+          hasSoftDelete: /softDelete|deletedAt/i.test(content),
+          hasTimestamps: /timestamps/i.test(content),
+        });
+      }
+    }
+
+    // 3. Mongoose Discriminators: Base.discriminator('VariantName', schema)
+    const discRegex = /\.discriminator(?:<[^>]+>)?\s*\(\s*['"`]([^'"`]+)['"`]/g;
+    while ((match = discRegex.exec(content)) !== null) {
+      const discName = match[1];
+      out.set(discName, {
+        modelName: discName,
+        collectionOrTable: "matches (discriminator)",
+        fields: [],
+        sourceFile: relPath,
+        framework: "Mongoose",
+        hasSoftDelete: true,
+        hasTimestamps: true,
+        isDiscriminator: true,
+        baseModel: "Match",
+      });
+    }
+
+    // 4. Module Registry Discriminators: matches: { schema: ... } or registerMatchDiscriminator(mod.id, ...)
+    const regMatchDiscRegex = /registerMatchDiscriminator\s*\(\s*(?:['"`]([^'"`]+)['"`]|([a-zA-Z0-9_.]+))/g;
+    while ((match = regMatchDiscRegex.exec(content)) !== null) {
+      const id = (match[1] || match[2] || "").replace(/['"`]/g, "");
+      if (id && id !== "moduleId") {
+        const discName = `Match:${id}`;
+        out.set(discName, {
+          modelName: discName,
+          collectionOrTable: "matches",
+          fields: [],
+          sourceFile: relPath,
+          framework: "Mongoose",
+          hasSoftDelete: true,
+          hasTimestamps: true,
+          isDiscriminator: true,
+          baseModel: "Match",
+        });
+      }
+    }
+
+    // Check matches: { schema: ... } in module definitions
+    if (content.includes("matches:") && relPath.includes("modules/")) {
+      const modName = basename(join(relPath, ".."));
+      const discName = `Match:${modName}`;
+      if (!out.has(discName)) {
+        out.set(discName, {
+          modelName: discName,
+          collectionOrTable: "matches",
+          fields: [],
+          sourceFile: relPath,
+          framework: "Mongoose",
+          hasSoftDelete: true,
+          hasTimestamps: true,
+          isDiscriminator: true,
+          baseModel: "Match",
+        });
+      }
+    }
   }
 
   private parseMongooseFields(body: string): DataField[] {
@@ -166,44 +268,202 @@ export class SchemaAnalyzer {
       if (fieldMatch) {
         const name = fieldMatch[1].trim();
         const typeStr = fieldMatch[2].trim();
-        if (["type", "default", "required", "index"].includes(name)) continue;
+        if (["type", "default", "required", "index", "unique", "ref", "enum"].includes(name)) continue;
+
+        let ref: string | undefined;
+        const refMatch = /ref:\s*['"`]([^'"`]+)['"`]/.exec(line);
+        if (refMatch) ref = refMatch[1];
 
         fields.push({
           name,
           type: typeStr.replace(/[^a-zA-Z0-9_[\]]/g, "") || "String",
           required: line.includes("required: true"),
           indexed: line.includes("index: true") || line.includes("unique: true"),
+          ref,
         });
       }
     }
-    return fields.slice(0, 15);
+    return fields.slice(0, 20);
   }
 
-  private parsePrismaFields(body: string): DataField[] {
-    const fields: DataField[] = [];
-    const lines = body.split("\n");
+  private parseCompoundIndexes(content: string): CompoundIndex[] {
+    const indexes: CompoundIndex[] = [];
+    const indexRegex = /\.index\s*\(\s*\{([^}]+)\}(?:,\s*\{([^}]+)\})?\s*\)/g;
+    let match;
+    while ((match = indexRegex.exec(content)) !== null) {
+      const fieldsBody = match[1];
+      const optsBody = match[2] || "";
 
-    for (const line of lines) {
-      const tokens = line.trim().split(/\s+/);
-      if (tokens.length >= 2 && !tokens[0].startsWith("//") && !tokens[0].startsWith("@")) {
-        fields.push({
-          name: tokens[0],
-          type: tokens[1].replace("?", ""),
-          required: !tokens[1].includes("?"),
-          indexed: line.includes("@id") || line.includes("@unique"),
+      const fields: Record<string, number> = {};
+      for (const pair of fieldsBody.split(",")) {
+        const parts = pair.split(":");
+        if (parts.length === 2) {
+          const k = parts[0].trim().replace(/['"`]/g, "");
+          const v = parseInt(parts[1].trim(), 10) || 1;
+          if (k) fields[k] = v;
+        }
+      }
+
+      indexes.push({
+        fields,
+        unique: optsBody.includes("unique: true"),
+        partialFilterExpression: optsBody.includes("partialFilterExpression") ? "filtered" : undefined,
+      });
+    }
+    return indexes;
+  }
+
+  private extractPrismaModels(content: string, relPath: string, out: Map<string, DataModelContract>) {
+    const modelRegex = /model\s+([a-zA-Z0-9_]+)\s*\{([^}]+)\}/g;
+    let match;
+    while ((match = modelRegex.exec(content)) !== null) {
+      const modelName = match[1];
+      const body = match[2];
+      const fields: DataField[] = [];
+
+      for (const line of body.split("\n")) {
+        const tokens = line.trim().split(/\s+/);
+        if (tokens.length >= 2 && !tokens[0].startsWith("//") && !tokens[0].startsWith("@")) {
+          fields.push({
+            name: tokens[0],
+            type: tokens[1].replace("?", ""),
+            required: !tokens[1].includes("?"),
+            indexed: line.includes("@id") || line.includes("@unique"),
+          });
+        }
+      }
+
+      out.set(modelName, {
+        modelName,
+        collectionOrTable: modelName.toLowerCase(),
+        fields: fields.slice(0, 20),
+        sourceFile: relPath,
+        framework: "Prisma",
+        hasSoftDelete: /deletedAt/i.test(body),
+        hasTimestamps: /createdAt|updatedAt/i.test(body),
+      });
+    }
+  }
+
+  private extractPythonModels(content: string, relPath: string, out: Map<string, DataModelContract>) {
+    const pyClassRegex = /class\s+([a-zA-Z0-9_]+)\s*\((?:Base|models\.Model|db\.Model)\):/g;
+    let match;
+    while ((match = pyClassRegex.exec(content)) !== null) {
+      const modelName = match[1];
+      const tableMatch = /__tablename__\s*=\s*['"`]([^'"`]+)['"`]/.exec(content);
+      const isDisc = content.includes("polymorphic_on") || content.includes("polymorphic_identity");
+
+      out.set(modelName, {
+        modelName,
+        collectionOrTable: tableMatch ? tableMatch[1] : modelName.toLowerCase(),
+        fields: [],
+        sourceFile: relPath,
+        framework: "SQLAlchemy",
+        hasSoftDelete: /is_deleted|deleted_at/i.test(content),
+        hasTimestamps: /created_at|updated_at/i.test(content),
+        isDiscriminator: isDisc,
+      });
+    }
+  }
+
+  private extractTypeOrmModels(content: string, relPath: string, out: Map<string, DataModelContract>) {
+    const entityRegex = /@Entity\s*\((?:['"`]([^'"`]+)['"`])?\)\s*(?:export\s+)?class\s+([a-zA-Z0-9_]+)/g;
+    let match;
+    while ((match = entityRegex.exec(content)) !== null) {
+      const tableName = match[1] || match[2].toLowerCase();
+      const modelName = match[2];
+
+      out.set(modelName, {
+        modelName,
+        collectionOrTable: tableName,
+        fields: [],
+        sourceFile: relPath,
+        framework: "TypeORM",
+        hasSoftDelete: /@DeleteDateColumn/i.test(content),
+        hasTimestamps: /@CreateDateColumn/i.test(content),
+      });
+    }
+  }
+
+  private extractJpaModels(content: string, relPath: string, out: Map<string, DataModelContract>) {
+    const jpaRegex = /(?:@Entity[^\n]*\n)?(?:@Table\s*\(\s*name\s*=\s*['"`]([^'"`]+)['"`]\s*\)\s*)?(?:public\s+)?class\s+([a-zA-Z0-9_]+)/g;
+    let match;
+    while ((match = jpaRegex.exec(content)) !== null) {
+      const tableName = match[1] || match[2].toLowerCase();
+      const modelName = match[2];
+      const isInheritance = content.includes("@Inheritance") || content.includes("@DiscriminatorValue");
+
+      out.set(modelName, {
+        modelName,
+        collectionOrTable: tableName,
+        fields: [],
+        sourceFile: relPath,
+        framework: "JPA/Hibernate",
+        hasSoftDelete: /deleted|active/i.test(content),
+        hasTimestamps: /createdDate|lastModifiedDate/i.test(content),
+        isDiscriminator: isInheritance,
+      });
+    }
+  }
+
+  private extractEfCoreModels(content: string, relPath: string, out: Map<string, DataModelContract>) {
+    const efRegex = /public\s+class\s+([a-zA-Z0-9_]+)(?:\s*:\s*([a-zA-Z0-9_]+))?/g;
+    let match;
+    while ((match = efRegex.exec(content)) !== null) {
+      const modelName = match[1];
+      if (content.includes("DbSet<" + modelName + ">") || content.includes("HasDiscriminator")) {
+        out.set(modelName, {
+          modelName,
+          collectionOrTable: modelName.toLowerCase() + "s",
+          fields: [],
+          sourceFile: relPath,
+          framework: "EFCore",
+          hasSoftDelete: /IsDeleted/i.test(content),
+          hasTimestamps: /CreatedAt/i.test(content),
+          isDiscriminator: content.includes("HasDiscriminator"),
         });
       }
     }
-    return fields.slice(0, 15);
+  }
+
+  private extractGormModels(content: string, relPath: string, out: Map<string, DataModelContract>) {
+    const gormRegex = /type\s+([a-zA-Z0-9_]+)\s+struct\s*\{[^}]*gorm\.Model/g;
+    let match;
+    while ((match = gormRegex.exec(content)) !== null) {
+      const modelName = match[1];
+      out.set(modelName, {
+        modelName,
+        collectionOrTable: modelName.toLowerCase() + "s",
+        fields: [],
+        sourceFile: relPath,
+        framework: "GORM",
+        hasSoftDelete: true, // gorm.Model has DeletedAt soft delete
+        hasTimestamps: true,
+      });
+    }
   }
 
   private findSourceFiles(dir: string, depth: number = 0): string[] {
-    if (depth > 5) return [];
+    if (depth > 15) return [];
     const files: string[] = [];
     try {
       const entries = readdirSync(dir);
       for (const entry of entries) {
-        if (entry === "node_modules" || entry === "target" || entry === ".git" || entry === "dist" || entry.startsWith(".")) {
+        if (
+          entry === "node_modules" ||
+          entry === "target" ||
+          entry === ".git" ||
+          entry === "dist" ||
+          entry === "build" ||
+          entry === ".autodoc" ||
+          entry === ".turbo" ||
+          entry === ".next" ||
+          entry === "vendor" ||
+          entry === "__pycache__" ||
+          entry === ".venv" ||
+          entry === ".cargo" ||
+          entry.startsWith(".")
+        ) {
           continue;
         }
         const fullPath = join(dir, entry);
@@ -212,7 +472,7 @@ export class SchemaAnalyzer {
           files.push(...this.findSourceFiles(fullPath, depth + 1));
         } else if (stat.isFile()) {
           const ext = extname(fullPath);
-          if ([".ts", ".js", ".prisma", ".sql"].includes(ext)) {
+          if ([".ts", ".tsx", ".js", ".jsx", ".prisma", ".sql", ".py", ".go", ".rs", ".java", ".kt", ".cs"].includes(ext)) {
             files.push(fullPath);
           }
         }

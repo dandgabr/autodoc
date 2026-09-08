@@ -21,6 +21,8 @@ export const ScanRepositorySchema = z.object({
 });
 
 export const GetC4DiagramSchema = z.object({
+  repoPath: z.string().optional(),
+  repository_path: z.string().optional(),
   level: z.number().int().min(1).max(4).default(2),
   max_nodes: z.number().int().min(10).max(100).default(35),
   format: z.enum(["mermaid", "structurizr"]).default("mermaid"),
@@ -29,6 +31,8 @@ export const GetC4DiagramSchema = z.object({
 });
 
 export const GetSymbolContractSchema = z.object({
+  repoPath: z.string().optional(),
+  repository_path: z.string().optional(),
   symbolName: z.string().optional(),
   symbol_fqsn: z.string().optional(),
   filePath: z.string().optional(),
@@ -36,6 +40,8 @@ export const GetSymbolContractSchema = z.object({
 });
 
 export const TraceDataFlowSchema = z.object({
+  repoPath: z.string().optional(),
+  repository_path: z.string().optional(),
   sourceEntrypoint: z.string().optional(),
   entrypoint_symbol: z.string().optional(),
   targetSink: z.string().optional(),
@@ -44,6 +50,8 @@ export const TraceDataFlowSchema = z.object({
 });
 
 export const ListApiContractsSchema = z.object({
+  repoPath: z.string().optional(),
+  repository_path: z.string().optional(),
   protocolFilter: z.string().optional(),
   protocol_filter: z.enum(["ALL", "REST", "SOAP", "GRPC", "GRAPHQL", "CORBA"]).optional(),
   limit: z.number().int().min(1).max(100).default(50),
@@ -51,12 +59,16 @@ export const ListApiContractsSchema = z.object({
 });
 
 export const ListSocketContractsSchema = z.object({
+  repoPath: z.string().optional(),
+  repository_path: z.string().optional(),
   directionFilter: z.string().optional(),
   direction_filter: z.enum(["ALL", "CLIENT_TO_SERVER", "SERVER_TO_CLIENT", "BIDIRECTIONAL"]).optional(),
   limit: z.number().int().min(1).max(100).default(50),
 });
 
 export const ExportDocumentationSchema = z.object({
+  repoPath: z.string().optional(),
+  repository_path: z.string().optional(),
   outputDir: z.string().default("./docs"),
   output_dir: z.string().optional(),
 });
@@ -70,17 +82,35 @@ export const GenerateAdrSchema = z.object({
 });
 
 export const PurgeCacheSchema = z.object({
+  repoPath: z.string().optional(),
+  repository_path: z.string().optional(),
   confirm: z.boolean().default(true),
   vacuum: z.boolean().default(true),
 });
 
+let globalLastTargetRepoPath: string = process.cwd();
+
+export function setLastScannedRepoPath(path: string) {
+  globalLastTargetRepoPath = path;
+}
+
+export function getLastScannedRepoPath(): string {
+  return globalLastTargetRepoPath;
+}
+
 export class AutoDocTools {
   private binding: ReturnType<typeof loadNativeBinding>;
   private i18n: I18nManager;
+  private lastTargetRepoPath: string = process.cwd();
 
   constructor(binding: ReturnType<typeof loadNativeBinding>, i18n: I18nManager) {
     this.binding = binding;
     this.i18n = i18n;
+    this.lastTargetRepoPath = globalLastTargetRepoPath;
+  }
+
+  private resolveTargetRepo(args: { repoPath?: string; repository_path?: string }): string {
+    return args.repoPath || args.repository_path || this.lastTargetRepoPath || globalLastTargetRepoPath || process.cwd();
   }
 
   getToolDefinitions() {
@@ -98,7 +128,10 @@ export class AutoDocTools {
   }
 
   async handleScanRepository(args: z.infer<typeof ScanRepositorySchema>) {
-    const targetPath = args.repoPath || args.repository_path || process.cwd();
+    const targetPath = this.resolveTargetRepo(args);
+    this.lastTargetRepoPath = targetPath;
+    globalLastTargetRepoPath = targetPath;
+
     let scannedFiles = 0;
     let totalLoc = 0;
     let totalSymbols = 0;
@@ -136,7 +169,8 @@ export class AutoDocTools {
   }
 
   async handleGetC4Diagram(args: z.infer<typeof GetC4DiagramSchema>) {
-    const analyzer = new ArchitectureAnalyzer(process.cwd());
+    const targetRepo = this.resolveTargetRepo(args);
+    const analyzer = new ArchitectureAnalyzer(targetRepo);
     const graph = analyzer.getArchitectureGraph(args.level, args.max_nodes);
     const title = graph.title || this.i18n.t("c4.containers") || "AutoDoc System Architecture";
 
@@ -161,6 +195,7 @@ export class AutoDocTools {
   }
 
   async handleGetSymbolContract(args: z.infer<typeof GetSymbolContractSchema>) {
+    const targetRepo = this.resolveTargetRepo(args);
     const sym = args.symbolName || args.symbol_fqsn || "unknown";
     const file = args.filePath || "unknown";
     let rawContract = `pub fn ${sym}(token: String) -> Result<String, AutoDocError>`;
@@ -169,7 +204,7 @@ export class AutoDocTools {
     let lineEnd = 10;
 
     // Check SQLite cache for actual symbol definition
-    const dbPath = join(process.cwd(), ".autodoc", "cache.db");
+    const dbPath = join(targetRepo, ".autodoc", "cache.db");
     if (existsSync(dbPath)) {
       try {
         const db = new DatabaseSync(dbPath, { readOnly: true });
@@ -209,6 +244,7 @@ export class AutoDocTools {
   }
 
   async handleTraceDataFlow(args: z.infer<typeof TraceDataFlowSchema>) {
+    const targetRepo = this.resolveTargetRepo(args);
     const src = args.sourceEntrypoint || args.entrypoint_symbol || "main";
     const sink = args.targetSink || "sqlite_edges";
     const maxDepth = args.maxDepth || args.max_depth || 5;
@@ -219,7 +255,7 @@ export class AutoDocTools {
       { step: 3, node: sink, kind: "SINK" },
     ];
 
-    const dbPath = join(process.cwd(), ".autodoc", "cache.db");
+    const dbPath = join(targetRepo, ".autodoc", "cache.db");
     if (existsSync(dbPath)) {
       try {
         const db = new DatabaseSync(dbPath, { readOnly: true });
@@ -255,7 +291,8 @@ export class AutoDocTools {
   }
 
   async handleListApiContracts(args: z.infer<typeof ListApiContractsSchema>) {
-    const analyzer = new RestAnalyzer(process.cwd());
+    const targetRepo = this.resolveTargetRepo(args);
+    const analyzer = new RestAnalyzer(targetRepo);
     const filter = args.protocolFilter || args.protocol_filter || "ALL";
     const contracts = analyzer.discoverEndpoints(filter, args.limit);
 
@@ -268,7 +305,8 @@ export class AutoDocTools {
   }
 
   async handleListSocketContracts(args: z.infer<typeof ListSocketContractsSchema>) {
-    const analyzer = new RealtimeAnalyzer(process.cwd());
+    const targetRepo = this.resolveTargetRepo(args);
+    const analyzer = new RealtimeAnalyzer(targetRepo);
     const filter = args.directionFilter || args.direction_filter || "ALL";
     const contracts = analyzer.discoverSocketContracts(filter, args.limit);
 
@@ -281,8 +319,9 @@ export class AutoDocTools {
   }
 
   async handleExportDocumentation(args: z.infer<typeof ExportDocumentationSchema>) {
-    const targetDir = args.output_dir || args.outputDir || "./docs";
-    const generator = new DiataxisGenerator(process.cwd());
+    const targetRepo = this.resolveTargetRepo(args);
+    const targetDir = args.output_dir || args.outputDir || join(targetRepo, "docs");
+    const generator = new DiataxisGenerator(targetRepo);
     const result = generator.exportToDirectory(targetDir);
 
     return {

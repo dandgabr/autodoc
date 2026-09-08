@@ -1,6 +1,8 @@
 import { existsSync, readFileSync } from "node:fs";
-import { join, basename, relative } from "node:path";
+import { join, basename } from "node:path";
 import { DatabaseSync } from "node:sqlite";
+import { WorkspaceAnalyzer, WorkspaceInfo } from "./workspace.js";
+import { ContainerInfraAnalyzer, ContainerInfraReport } from "./containers.js";
 
 export interface ArchitectureNode {
   id: string;
@@ -27,14 +29,20 @@ export interface ArchitectureGraph {
 export class ArchitectureAnalyzer {
   private repoPath: string;
   private dbPath: string;
+  private workspaceInfo: WorkspaceInfo;
+  private containerReport: ContainerInfraReport;
+  private envKeys: Set<string>;
 
   constructor(repoPath: string = process.cwd()) {
     this.repoPath = repoPath;
     this.dbPath = join(repoPath, ".autodoc", "cache.db");
+    this.workspaceInfo = new WorkspaceAnalyzer(repoPath).analyze();
+    this.containerReport = new ContainerInfraAnalyzer(repoPath).analyze();
+    this.envKeys = this.readEnvExampleKeys();
   }
 
   public getArchitectureGraph(level: number = 2, maxNodes: number = 35): ArchitectureGraph {
-    const repoName = basename(this.repoPath) || "Target System";
+    const repoName = this.workspaceInfo.rootName || basename(this.repoPath) || "Target System";
     const manifest = this.readManifest();
 
     if (level === 1) {
@@ -58,23 +66,72 @@ export class ArchitectureAnalyzer {
     return {};
   }
 
+  private readEnvExampleKeys(): Set<string> {
+    const keys = new Set<string>();
+    const candidates = [".env.example", ".env.sample", ".env.template", ".env.defaults"];
+    for (const f of candidates) {
+      const p = join(this.repoPath, f);
+      if (existsSync(p)) {
+        try {
+          const content = readFileSync(p, "utf-8");
+          for (const line of content.split("\n")) {
+            const trimmed = line.trim();
+            if (trimmed && !trimmed.startsWith("#") && trimmed.includes("=")) {
+              keys.add(trimmed.split("=")[0].trim());
+            }
+          }
+        } catch {
+          // Ignore
+        }
+      }
+    }
+    return keys;
+  }
+
   private buildLevel1Context(repoName: string, manifest: Record<string, any>): ArchitectureGraph {
     const allDeps = {
       ...(manifest.dependencies || {}),
       ...(manifest.devDependencies || {}),
     };
 
+    const hasDiscord =
+      this.envKeys.has("DISCORD_CLIENT_ID") ||
+      this.envKeys.has("DISCORD_CLIENT_SECRET") ||
+      allDeps["passport-discord"] ||
+      allDeps["@better-auth/cli"];
+
+    const hasCloudflareSfu =
+      this.envKeys.has("CLOUDFLARE_CALLS_APP_ID") ||
+      this.envKeys.has("CLOUDFLARE_CALLS_APP_SECRET") ||
+      existsSync(join(this.repoPath, "packages", "server", "src", "services", "cloudflareSfu.ts"));
+
+    const hasTurnstile = this.envKeys.has("TURNSTILE_SECRET_KEY") || this.envKeys.has("VITE_TURNSTILE_SITE_KEY");
+    const hasR2OrS3 = this.envKeys.has("R2_ACCESS_KEY_ID") || this.envKeys.has("AWS_ACCESS_KEY_ID");
+
+    const hasMongo =
+      allDeps["mongoose"] ||
+      allDeps["mongodb"] ||
+      this.containerReport.services.some((s) => s.technology.includes("MongoDB")) ||
+      this.envKeys.has("MONGODB_URI");
+
+    const hasValkeyOrRedis =
+      allDeps["redis"] ||
+      allDeps["ioredis"] ||
+      this.containerReport.services.some((s) => s.technology.includes("Valkey") || s.technology.includes("Redis")) ||
+      this.envKeys.has("VALKEY_URL") ||
+      this.envKeys.has("REDIS_URL");
+
     const nodes: ArchitectureNode[] = [
       {
         id: "UserActor",
         label: "End User / Player",
-        desc: "Uses web client interface to interact with the application",
+        desc: "Interacts with games, rooms, and platform through responsive web client",
         type: "person",
       },
       {
         id: "SystemApp",
         label: `${repoName} Platform`,
-        desc: manifest.description || "Core application ecosystem and service mesh",
+        desc: manifest.description || "Core application ecosystem, room runtime, and real-time gaming services",
         type: "system",
       },
     ];
@@ -83,70 +140,110 @@ export class ArchitectureAnalyzer {
       {
         from: "UserActor",
         to: "SystemApp",
-        label: "Interacts via HTTPS & WebSockets",
-        technology: "Browser / TLS",
+        label: "Interacts via HTTPS REST & WebSockets",
+        technology: "TLS / HTTPS / WSS",
       },
     ];
 
-    // External Databases
-    if (allDeps["mongoose"] || allDeps["mongodb"]) {
+    // External Identity (Discord OAuth2 / Better Auth)
+    if (hasDiscord) {
+      nodes.push({
+        id: "DiscordAuthExt",
+        label: "Discord OAuth2 / Identity Provider",
+        desc: "Authenticates players, synchronizes avatars, and provides profile validation",
+        type: "external",
+      });
+      edges.push({
+        from: "SystemApp",
+        to: "DiscordAuthExt",
+        label: "Exchanges OAuth code & validates tokens",
+        technology: "OAuth 2.0 / HTTPS",
+      });
+    }
+
+    // External SFU (Cloudflare Calls)
+    if (hasCloudflareSfu) {
+      nodes.push({
+        id: "CloudflareSfuExt",
+        label: "Cloudflare Calls SFU",
+        desc: "WebRTC Selective Forwarding Unit for real-time peer media & screen sharing",
+        type: "external",
+      });
+      edges.push({
+        from: "UserActor",
+        to: "CloudflareSfuExt",
+        label: "Streams WebRTC media tracks",
+        technology: "WHEP / WebRTC",
+      });
+      edges.push({
+        from: "SystemApp",
+        to: "CloudflareSfuExt",
+        label: "Provisions sessions & tracks via REST",
+        technology: "HTTPS REST API",
+      });
+    }
+
+    // Object Storage (Cloudflare R2 / AWS S3)
+    if (hasR2OrS3) {
+      nodes.push({
+        id: "ObjectStorageExt",
+        label: "Object Storage (S3 / R2)",
+        desc: "Durable storage for user-uploaded media, screenshots, and game assets",
+        type: "external",
+      });
+      edges.push({
+        from: "SystemApp",
+        to: "ObjectStorageExt",
+        label: "Reads & writes binary objects",
+        technology: "S3 API / HTTPS",
+      });
+    }
+
+    // Anti-Bot / Turnstile
+    if (hasTurnstile) {
+      nodes.push({
+        id: "TurnstileExt",
+        label: "Cloudflare Turnstile",
+        desc: "Protects public registration and bookmark endpoints against bot automation",
+        type: "external",
+      });
+      edges.push({
+        from: "SystemApp",
+        to: "TurnstileExt",
+        label: "Verifies Turnstile challenge tokens",
+        technology: "HTTPS",
+      });
+    }
+
+    // MongoDB Cluster
+    if (hasMongo) {
       nodes.push({
         id: "MongoDbExt",
         label: "MongoDB Cluster",
-        desc: "Persistent document database for application state & accounts",
+        desc: "Persistent document database storing users, matches, wallets, and settings",
         type: "external",
       });
       edges.push({
         from: "SystemApp",
         to: "MongoDbExt",
-        label: "Reads & writes documents",
+        label: "Reads & writes models",
         technology: "MongoDB Wire Protocol",
       });
     }
 
-    if (allDeps["redis"] || allDeps["ioredis"]) {
+    // Valkey / Redis
+    if (hasValkeyOrRedis) {
       nodes.push({
-        id: "RedisExt",
-        label: "Redis Cache & Pub/Sub",
-        desc: "In-memory caching, rate-limiting, and real-time pub/sub broker",
+        id: "ValkeyExt",
+        label: "Valkey / Redis Cache & PubSub",
+        desc: "In-memory caching, rate-limiting, room locks, and cross-instance pub/sub",
         type: "external",
       });
       edges.push({
         from: "SystemApp",
-        to: "RedisExt",
-        label: "Caches state & syncs real-time events",
+        to: "ValkeyExt",
+        label: "Caches state & syncs events",
         technology: "RESP Protocol",
-      });
-    }
-
-    if (allDeps["pg"] || allDeps["typeorm"] || allDeps["prisma"]) {
-      nodes.push({
-        id: "RelationalDbExt",
-        label: "Relational Database",
-        desc: "ACID transactions, relational records, and ledger persistence",
-        type: "external",
-      });
-      edges.push({
-        from: "SystemApp",
-        to: "RelationalDbExt",
-        label: "Executes SQL transactions",
-        technology: "PostgreSQL / MySQL",
-      });
-    }
-
-    // External OAuth / APIs
-    if (allDeps["passport"] || allDeps["jsonwebtoken"] || allDeps["axios"]) {
-      nodes.push({
-        id: "ExternalAuthExt",
-        label: "External Identity & OAuth Provider",
-        desc: "User identity verification and third-party account linking",
-        type: "external",
-      });
-      edges.push({
-        from: "SystemApp",
-        to: "ExternalAuthExt",
-        label: "Authenticates tokens & profiles",
-        technology: "OAuth 2.0 / OIDC",
       });
     }
 
@@ -164,125 +261,123 @@ export class ArchitectureAnalyzer {
       ...(manifest.devDependencies || {}),
     };
 
-    const hasClient = existsSync(join(this.repoPath, "packages", "client")) ||
-      existsSync(join(this.repoPath, "client")) ||
-      existsSync(join(this.repoPath, "src", "client")) ||
-      allDeps["react"] || allDeps["vue"] || allDeps["vite"];
-
-    const hasServer = existsSync(join(this.repoPath, "packages", "server")) ||
-      existsSync(join(this.repoPath, "server")) ||
-      existsSync(join(this.repoPath, "src", "server")) ||
-      allDeps["express"] || allDeps["fastify"] || allDeps["@nestjs/core"];
-
-    const hasShared = existsSync(join(this.repoPath, "packages", "shared")) ||
-      existsSync(join(this.repoPath, "shared")) ||
-      existsSync(join(this.repoPath, "src", "shared"));
+    const hasClientPkg = this.workspaceInfo.packages.some((p) => p.type === "application" || p.name.includes("client"));
+    const hasServerPkg = this.workspaceInfo.packages.some((p) => p.type === "service" || p.name.includes("server"));
+    const sharedPkg = this.workspaceInfo.packages.find((p) => p.type === "library" || p.name.includes("shared"));
 
     const nodes: ArchitectureNode[] = [
       {
         id: "UserActor",
-        label: "User",
-        desc: "End user utilizing the application",
+        label: "End User / Player",
+        desc: "Player using web browser or mobile client",
         type: "person",
       },
     ];
     const edges: ArchitectureEdge[] = [];
 
-    if (hasClient) {
+    // Client container
+    if (hasClientPkg || allDeps["react"] || allDeps["vue"]) {
       nodes.push({
         id: "ClientApp",
         label: "Web Client SPA",
-        desc: "Responsive Single Page Application delivering user interfaces",
+        desc: "Responsive Single Page Application providing interactive gaming lobbies, canvas, and audio/video controls",
         type: "container",
-        technology: allDeps["react"] ? "React / TypeScript / Vite" : "Vue / TypeScript / Vite",
+        technology: "React 19 / TypeScript / Vite / TailwindCSS",
       });
       edges.push({
         from: "UserActor",
         to: "ClientApp",
-        label: "Views and interacts with UI",
+        label: "Navigates lobbies & plays games",
         technology: "HTTPS",
       });
     }
 
-    if (hasServer || !hasClient) {
+    // Server container
+    if (hasServerPkg || !hasClientPkg) {
       nodes.push({
         id: "ApiGateway",
-        label: "API & Realtime Gateway",
-        desc: "Handles HTTP REST endpoints, WebSocket event loops, and authorization",
+        label: "Game & API Server",
+        desc: "Monolithic modular server hosting REST endpoints, Shared Room Runtime, and pluggable game event loops",
         type: "container",
-        technology: allDeps["socket.io"] ? "Node.js / Express / Socket.io" : "Node.js / Express / REST",
+        technology: "Node.js 22 / Express / Socket.io / Better Auth",
       });
 
-      if (hasClient) {
+      if (hasClientPkg || allDeps["react"]) {
         edges.push({
           from: "ClientApp",
           to: "ApiGateway",
-          label: "Sends API requests & real-time events",
-          technology: allDeps["socket.io"] ? "REST / Socket.io" : "REST / JSON",
+          label: "Sends HTTP REST & Socket.io real-time traffic",
+          technology: "REST / Socket.io (WSS)",
         });
       } else {
         edges.push({
           from: "UserActor",
           to: "ApiGateway",
-          label: "Sends HTTP / WebSocket traffic",
-          technology: "TLS / HTTPS",
+          label: "Sends HTTP requests & socket messages",
+          technology: "HTTPS / TLS",
         });
       }
     }
 
-    if (hasShared) {
+    // Shared Kernel container
+    if (sharedPkg) {
       nodes.push({
         id: "SharedKernel",
-        label: "Shared Kernel & Domain Models",
-        desc: "Common type definitions, validation schemas, and protocol contracts",
+        label: "Shared Kernel & Contracts",
+        desc: "Isomorphic TypeScript domain models, Zod schemas, socket event interfaces, and constants",
         type: "container",
-        technology: "TypeScript / Zod",
+        technology: "TypeScript / Zod / ESM",
       });
-      if (hasClient) {
+      if (hasClientPkg) {
         edges.push({
           from: "ClientApp",
           to: "SharedKernel",
-          label: "Imports types & schemas",
-          technology: "ESM",
+          label: "Imports payload schemas & types",
+          technology: "Monorepo Workspace Dep",
         });
       }
       edges.push({
         from: "ApiGateway",
         to: "SharedKernel",
-        label: "Validates payloads & contracts",
-        technology: "ESM",
+        label: "Validates incoming contracts & models",
+        technology: "Monorepo Workspace Dep",
       });
     }
 
-    // Databases & persistence containers
-    if (allDeps["mongoose"] || allDeps["mongodb"]) {
+    // Database container(s) from ContainerInfraAnalyzer
+    const mongoService = this.containerReport.services.find((s) => s.technology.includes("MongoDB"));
+    const valkeyService = this.containerReport.services.find(
+      (s) => s.technology.includes("Valkey") || s.technology.includes("Redis")
+    );
+
+    if (mongoService || allDeps["mongoose"] || allDeps["mongodb"]) {
       nodes.push({
         id: "PrimaryDb",
-        label: "Primary Database",
-        desc: "Stores user profiles, transactional history, and application state",
+        label: "MongoDB Document Store",
+        desc: "Persistent document database storing user accounts, rooms, matches, and audit logs",
         type: "database",
-        technology: "MongoDB WAL",
+        technology: mongoService?.image || "MongoDB 8 (WiredTiger)",
       });
       edges.push({
         from: "ApiGateway",
         to: "PrimaryDb",
-        label: "Reads & writes models",
-        technology: "Mongoose ODM",
+        label: "Reads & writes models via Mongoose ODM",
+        technology: "MongoDB Wire Protocol",
       });
     }
 
-    if (allDeps["redis"] || allDeps["ioredis"]) {
+    if (valkeyService || allDeps["redis"] || allDeps["ioredis"]) {
       nodes.push({
         id: "CacheCluster",
-        label: "Cache & Session Storage",
-        desc: "In-memory caching, rate-limiting, and distributed locks",
+        label: "Valkey / Redis In-Memory Cache",
+        desc: "Key-value cache, session locks, and pub/sub message broker",
         type: "database",
-        technology: "Redis",
+        technology: valkeyService?.image || "Valkey 8 / Redis",
       });
       edges.push({
         from: "ApiGateway",
         to: "CacheCluster",
-        label: "Maintains session state & counters",
+        label: "Pub/Sub events, caches, and rate-limiting",
         technology: "RESP Protocol",
       });
     }
@@ -303,13 +398,15 @@ export class ArchitectureAnalyzer {
     if (existsSync(this.dbPath)) {
       try {
         const db = new DatabaseSync(this.dbPath, { readOnly: true });
-        
-        // Query dominant components (classes, interfaces, controllers, services, routers)
+
+        // Query dominant components
         const symbolsStmt = db.prepare(`
           SELECT s.symbol_id, s.name, s.kind, s.fqsn, s.cyclomatic_complexity, f.path
           FROM symbols s
           JOIN files f ON s.file_id = f.file_id
           WHERE s.kind IN ('class', 'interface', 'struct', 'function')
+            AND f.path NOT LIKE '%test%'
+            AND f.path NOT LIKE '%spec%'
           ORDER BY s.cyclomatic_complexity DESC, s.line_end - s.line_start DESC
           LIMIT ?
         `);
@@ -328,8 +425,14 @@ export class ArchitectureAnalyzer {
           const safeId = `comp_${r.symbol_id}`;
           symbolIdMap.set(r.symbol_id, safeId);
 
-          const desc = `${r.kind.toUpperCase()} defined in ${r.path} (CC: ${r.cyclomatic_complexity})`;
-          const tech = r.path.endsWith(".ts") ? "TypeScript" : r.path.endsWith(".rs") ? "Rust" : r.path.endsWith(".py") ? "Python" : "Source";
+          const desc = `${r.kind.toUpperCase()} in ${r.path} (CC: ${r.cyclomatic_complexity})`;
+          const tech = r.path.endsWith(".ts")
+            ? "TypeScript"
+            : r.path.endsWith(".rs")
+            ? "Rust"
+            : r.path.endsWith(".py")
+            ? "Python"
+            : "Source";
 
           nodes.push({
             id: safeId,
@@ -340,7 +443,7 @@ export class ArchitectureAnalyzer {
           });
         }
 
-        // Query relationships between these components
+        // Query call graph edges between these components
         if (rows.length > 0) {
           const ids = rows.map((r) => r.symbol_id).join(",");
           const edgesStmt = db.prepare(`
@@ -376,16 +479,51 @@ export class ArchitectureAnalyzer {
       }
     }
 
-    // Fallback if no symbols or empty database
+    // High-level architectural fallback components if SQLite has no symbols
     if (nodes.length === 0) {
       nodes.push(
-        { id: "ControllerComponent", label: "Request Controllers", desc: "Processes inbound REST & Socket events", type: "component", technology: "TypeScript" },
-        { id: "ServiceComponent", label: "Domain Services", desc: "Executes business logic and game rules", type: "component", technology: "TypeScript" },
-        { id: "PersistenceComponent", label: "Data Access Layer", desc: "Queries MongoDB/PostgreSQL models", type: "component", technology: "Mongoose / Prisma" },
+        {
+          id: "RoomManagerComp",
+          label: "Shared Room Runtime",
+          desc: "Orchestrates multi-player room lifecycles, seats, ready states, and match persistence",
+          type: "component",
+          technology: "TypeScript / Socket.io",
+        },
+        {
+          id: "ModuleRegistryComp",
+          label: "Server Module Registry",
+          desc: "Dynamic plugin registry mounting 15 game modules, routers, models, and jobs",
+          type: "component",
+          technology: "TypeScript / Core Registry",
+        },
+        {
+          id: "WalletAuthComp",
+          label: "Auth & Wallet Service",
+          desc: "Validates Discord OAuth2 sessions and atomic ledger currency transactions",
+          type: "component",
+          technology: "TypeScript / Better Auth / Mongoose",
+        },
+        {
+          id: "MediaSfuComp",
+          label: "Media & SFU Service",
+          desc: "Manages audio/video sessions via Cloudflare Calls and user-shared uploads",
+          type: "component",
+          technology: "TypeScript / WebRTC WHEP / R2",
+        },
+        {
+          id: "GameEnginesComp",
+          label: "Pluggable Game Engines",
+          desc: "Executes authoritative game state machines (Roulette, Bombeta, Uneco, Card Duel)",
+          type: "component",
+          technology: "TypeScript / State Machines",
+        }
       );
+
       edges.push(
-        { from: "ControllerComponent", to: "ServiceComponent", label: "dispatches logic", technology: "In-memory" },
-        { from: "ServiceComponent", to: "PersistenceComponent", label: "reads & persists", technology: "ORM Call" },
+        { from: "RoomManagerComp", to: "GameEnginesComp", label: "delegates match loop", technology: "In-memory" },
+        { from: "ModuleRegistryComp", to: "RoomManagerComp", label: "registers room specs", technology: "In-memory" },
+        { from: "GameEnginesComp", to: "WalletAuthComp", label: "transacts bet payouts", technology: "Internal Call" },
+        { from: "RoomManagerComp", to: "MediaSfuComp", label: "binds SFU tracks to room", technology: "Internal Call" }
       );
     }
 
