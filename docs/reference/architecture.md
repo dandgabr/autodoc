@@ -11,22 +11,40 @@ AutoDoc employs a two-tier architecture:
 2. **Rust Core Engine (`crates/autodoc-core`)**: Handles compute-intensive operations (tree traversal, string interning, graph algorithms, and SQLite storage) exposed via NAPI-RS native bindings.
 
 ```mermaid
-C4Container
-    title AutoDoc High-Level System Topology
+flowchart TD
+    %% High Contrast Styling Definitions
+    classDef clientClass fill:#1E293B,stroke:#0EA5E9,stroke-width:2px,color:#FFFFFF,font-weight:bold;
+    classDef mcpClass fill:#1E1B4B,stroke:#818CF8,stroke-width:2px,color:#FFFFFF;
+    classDef rustClass fill:#311505,stroke:#FB923C,stroke-width:2px,color:#FFFFFF;
+    classDef dbClass fill:#064E3B,stroke:#34D399,stroke-width:2px,color:#FFFFFF;
 
-    Person(developer, "Developer / User", "Queries codebase architecture")
-    System_Ext(agent, "AI Agent Harness (Client)", "Claude Desktop, Antigravity, OpenCode, Cursor")
+    subgraph Clients["👤 Clients & Consumers"]
+        Dev["Developer / Engineer"]:::clientClass
+        Harness["AI Agent Harness<br/><small>Claude Desktop • Antigravity • OpenCode • Cursor</small>"]:::clientClass
+    end
 
-    Container_Boundary(b1, "AutoDoc MCP System") {
-        Container(mcp_server, "@autodoc/mcp Server", "Node.js / TypeScript", "Stdio transport, 7 tool handlers, Zod schema validation, output XSS sanitization, and i18n")
-        Container(core_engine, "@autodoc/core Engine", "Rust 2021 / NAPI-RS", "Parallel Rayon scanner, Petgraph, Lasso string interning, Shannon entropy & PII defense")
-        ContainerDb(storage, "Storage Engine", "SQLite WAL", "High-throughput persistence with r2d2_sqlite connection pool and covering indexes")
-    }
+    subgraph AutoDocSystem["⚡ AutoDoc Hybrid System Boundary"]
+        direction TB
 
-    Rel(developer, agent, "Prompts architectural queries")
-    Rel(agent, mcp_server, "JSON-RPC 2.0 over stdio")
-    Rel(mcp_server, core_engine, "Node-API FFI", "catch_unwind boundary")
-    Rel(core_engine, storage, "Persists files, symbols, and edges", "WAL mode")
+        subgraph MCPLayer["Node.js / TypeScript Host (@autodoc/mcp)"]
+            MCPServer["MCP Server (JSON-RPC 2.0 / Stdio)<br/><small>7 Tool Handlers • Zod Validation • i18n • Output Sanitizer</small>"]:::mcpClass
+        end
+
+        subgraph CoreLayer["Native Rust Engine (@autodoc/core via Node-API)"]
+            NativeCore["Native Engine (NAPI-RS / catch_unwind)<br/><small>Rayon Parallel Scanner • Petgraph • Lasso String Interning</small>"]:::rustClass
+        end
+
+        subgraph StorageLayer["Persistence & Caching"]
+            Storage["SQLite WAL Engine (.autodoc/cache.db)<br/><small>Covering Indexes • WITHOUT ROWID • r2d2_sqlite Pool</small>"]:::dbClass
+        end
+    end
+
+    Dev -->|"Prompts architectural queries"| Harness
+    Harness -->|"JSON-RPC 2.0 over Stdio"| MCPServer
+    MCPServer -->|"Node-API FFI (catch_unwind boundary)"| NativeCore
+    NativeCore -->|"Persists files, symbols, and edges"| Storage
+
+    linkStyle default stroke:#94A3B8,stroke-width:2px;
 ```
 
 ---

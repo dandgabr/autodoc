@@ -14,22 +14,43 @@
 AutoDoc pairs a high-performance **Rust Core Engine** (`crates/autodoc-core`) with a **TypeScript MCP Server** (`packages/autodoc-mcp`) via Node-API bindings:
 
 ```mermaid
-C4Container
-    title AutoDoc Code Explorer System Architecture
+flowchart TD
+    %% Global styling & High Contrast Theme Definitions
+    classDef clientClass fill:#1E293B,stroke:#0EA5E9,stroke-width:2px,color:#FFFFFF,font-weight:bold;
+    classDef boundaryClass fill:#0F172A,stroke:#64748B,stroke-width:2px,stroke-dasharray: 4 4,color:#38BDF8,font-weight:bold;
+    classDef mcpClass fill:#1E1B4B,stroke:#818CF8,stroke-width:2px,color:#FFFFFF;
+    classDef rustClass fill:#311505,stroke:#FB923C,stroke-width:2px,color:#FFFFFF;
+    classDef dbClass fill:#064E3B,stroke:#34D399,stroke-width:2px,color:#FFFFFF;
 
-    Person(developer, "Developer / Engineer", "Interacts with coding assistant or CLI.")
-    System_Ext(agent, "AI Agent Harness", "Claude Desktop, Cursor, Antigravity, OpenCode")
+    subgraph Clients["👤 User & Client Environment"]
+        Dev["fa:fa-user Developer / Engineer<br/><small>Interacts via CLI or AI Chat Interface</small>"]:::clientClass
+        Harness["🤖 AI Agent Harness<br/><small>Claude Desktop • Cursor • Antigravity • OpenCode</small>"]:::clientClass
+    end
 
-    Container_Boundary(b1, "AutoDoc MCP Server") {
-        Container(mcp_server, "@autodoc/mcp Server", "Node.js / TypeScript", "Stdio JSON-RPC 2.0 transport, Zod schemas, i18n and XSS-free C4 diagrams")
-        Container(core_engine, "@autodoc/core Engine", "Rust 2021 / NAPI-RS", "Parallel Rayon file scanner, Petgraph in-memory call graph, Shannon entropy & PII defense")
-        ContainerDb(cache_db, "Local Cache", "SQLite WAL", "High-throughput edge indexing with covering indexes and WITHOUT ROWID")
-    }
+    subgraph AutoDocSystem["⚡ AutoDoc Architecture Stack"]
+        direction TB
 
-    Rel(developer, agent, "Prompts architectural queries")
-    Rel(agent, mcp_server, "Dispatches MCP tool calls", "JSON-RPC 2.0 / stdio")
-    Rel(mcp_server, core_engine, "Executes compute-intensive algorithms", "Node-API FFI / catch_unwind")
-    Rel(core_engine, cache_db, "Persists scanned symbols and call graph edges", "r2d2_sqlite / WAL")
+        subgraph MCPLayer["Node.js / TypeScript Host (@autodoc/mcp)"]
+            MCPServer["🔌 MCP Server (JSON-RPC 2.0 / Stdio)<br/><small>• Tool Dispatcher (7 Tools) & Resources<br/>• Zod Schema Validation & i18n Engine<br/>• Prompt Guard & Output XSS Sanitizer</small>"]:::mcpClass
+        end
+
+        subgraph CoreLayer["Native Rust Engine (@autodoc/core via Node-API)"]
+            NativeCore["🦀 Native Core (NAPI-RS / catch_unwind)<br/><small>• Parallel Rayon File Walker & Git-Aware Traversal<br/>• Petgraph Memory Graph & Centrality Scoring<br/>• Lasso Threaded String Interning (&lt;100MB RSS)<br/>• Shannon Entropy & PII / Credential Scrubber</small>"]:::rustClass
+        end
+
+        subgraph StorageLayer["Persistence & Caching"]
+            CacheDB[("💾 SQLite WAL Storage (.autodoc/cache.db)<br/><small>• WITHOUT ROWID B-Tree Edge Indexing<br/>• Covering Indexes for O(1) Lookups<br/>• r2d2_sqlite Thread-Safe Connection Pool</small>")]:::dbClass
+        end
+    end
+
+    %% Vertical Hierarchical Flows
+    Dev -->|"Prompts queries / requests"| Harness
+    Harness -->|"Dispatches Tool Calls via Stdio JSON-RPC 2.0"| MCPServer
+    MCPServer -->|"Invokes Native Routines via Node-API FFI"| NativeCore
+    NativeCore -->|"Persists symbols & edges (WAL journal)"| CacheDB
+
+    %% Link High Contrast Styling
+    linkStyle default stroke:#94A3B8,stroke-width:2px;
 ```
 
 ---
