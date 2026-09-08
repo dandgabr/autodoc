@@ -19,12 +19,6 @@ export interface RestAnalyzerOptions {
   llmEnrichment?: boolean;
 }
 
-interface RouteMount {
-  prefix: string;
-  routerIdentifier?: string;
-  sourceFile: string;
-}
-
 export class RestAnalyzer {
   private repoPath: string;
   private includeTests: boolean;
@@ -299,7 +293,7 @@ export class RestAnalyzer {
 
   private resolvePrefixesForFile(
     file: string,
-    relPath: string,
+    _relPath: string,
     fileToPrefixes: Map<string, Set<string>>,
     identifierToPrefixes: Map<string, Set<string>>,
     dirToPrefixes: Map<string, Set<string>>

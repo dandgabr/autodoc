@@ -1,4 +1,4 @@
-import { readFileSync, readdirSync, statSync, existsSync } from "node:fs";
+import { readFileSync, readdirSync, statSync } from "node:fs";
 import { join, extname } from "node:path";
 import { isIgnoredDirectory, isTestPath } from "../utils.js";
 
@@ -42,7 +42,7 @@ export class RealtimeAnalyzer {
       // 2. Inspect Module Registries / Declared Socket Events
       this.extractModuleDeclaredSocketEvents(content, relPath, events);
 
-      // 3. Inspect Shared Room Runtime Events
+      // 3. Inspect Room Runtime Events (room:join, room:ready, etc.)
       this.extractRoomRuntimeEvents(content, relPath, events);
 
       // 4. Inspect Imperative socket.on / socket.emit / io.emit

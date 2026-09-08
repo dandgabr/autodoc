@@ -51,7 +51,6 @@ export interface ApiOperationContract {
   handler?: string;
 }
 
-const HTTP_METHODS = new Set(["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS", "HEAD"]);
 const BODY_METHODS = new Set(["POST", "PUT", "PATCH"]);
 const PATH_PARAM_REGEX = /(?::|\{)([a-zA-Z0-9_]+)(?:\}|(?=\/|$))/g;
 const STATUS_CODE_REGEX = /(?:res|response|ctx|c)\s*\.\s*status\s*\(\s*(\d{3})|\.\s*sendStatus\s*\(\s*(\d{3})|returning\s*\(\s*(\d{3})|@ResponseStatus\s*\(\s*[A-Za-z.]+\s*(\d{3})/g;
@@ -93,10 +92,6 @@ const TYPE_MAP: Record<string, OperationParameter["type"]> = {
   has: "boolean",
   enabled: "boolean",
 };
-
-export function isHttpMethod(m: string): boolean {
-  return HTTP_METHODS.has(m.toUpperCase());
-}
 
 export function expectsRequestBody(method: string): boolean {
   return BODY_METHODS.has(method.toUpperCase());
@@ -203,7 +198,7 @@ export function extractHandlerParams(
 export function extractRequestBody(
   handlerBody: string,
   method: string,
-  framework: "node" | "python" | "go" | "rust" | "jvm" | "dotnet" | "php" | "ruby"
+  _framework: "node" | "python" | "go" | "rust" | "jvm" | "dotnet" | "php" | "ruby"
 ): OperationBodySchema | undefined {
   if (!expectsRequestBody(method)) return undefined;
 
@@ -273,7 +268,7 @@ function destructureMatch(re: RegExpExecArray | null): re is RegExpExecArray {
  */
 export function extractResponses(
   handlerBody: string,
-  framework: "node" | "python" | "go" | "rust" | "jvm" | "dotnet" | "php" | "ruby"
+  _framework: "node" | "python" | "go" | "rust" | "jvm" | "dotnet" | "php" | "ruby"
 ): OperationResponse[] {
   const responses: Map<string, OperationResponse> = new Map();
   const setResponse = (statusCode: string, schema?: OperationResponse["schema"]) => {

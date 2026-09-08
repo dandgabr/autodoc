@@ -319,7 +319,7 @@ export class DiataxisGenerator {
         "# Copy example environment template",
         "cp .env.example .env",
         "```",
-        "_Configure database credentials (`MONGODB_URI`), cache (`VALKEY_URL`), and authentication secrets (`DISCORD_CLIENT_ID`, `BETTER_AUTH_SECRET`)._",
+        "_Configure database and cache connection variables and authentication secrets declared in `.env.example` (names vary per project: e.g. `DATABASE_URL`, `REDIS_URL`, `AUTH_SECRET`)._",
         "",
         "## 3. Start Infrastructure & Development Workflow",
         ...(this.workspaceInfo.makefile?.devTarget
@@ -511,7 +511,7 @@ export class DiataxisGenerator {
       existsSync(join(this.repoPath, "docker-compose.yml")) ||
       existsSync(join(this.repoPath, "compose.yml"))
     ) {
-      return "# Start backend databases (MongoDB, Valkey/Redis)\ndocker compose up -d";
+      return "# Start backend services (databases, caches, message brokers)\ndocker compose up -d";
     }
     if (existsSync(join(this.repoPath, "podman-compose.yml"))) {
       return "# Start containers with Podman\npodman-compose up -d";

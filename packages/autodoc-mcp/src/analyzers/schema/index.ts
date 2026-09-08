@@ -1,4 +1,4 @@
-import { readFileSync, readdirSync, statSync, existsSync } from "node:fs";
+import { readFileSync, readdirSync, statSync } from "node:fs";
 import { join, extname, basename } from "node:path";
 import { isIgnoredDirectory, isTestPath } from "../utils.js";
 

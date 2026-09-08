@@ -139,5 +139,3 @@ async function createLlamaServerProvider(resolved: ResolvedModel, config: LlmCon
     },
   };
 }
-
-export const LLM_DEFAULTS = { temperature: 0, maxTokens: 1024, timeoutMs: LLM_TIMEOUT_MS };

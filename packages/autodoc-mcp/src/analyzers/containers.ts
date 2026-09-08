@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { join, basename, extname } from "node:path";
 
 export type ContainerRuntimePattern =
@@ -330,7 +330,7 @@ export class ContainerInfraAnalyzer {
     }
   }
 
-  private discoverStandaloneContainerfiles(services: DiscoveredContainerService[], patterns: Set<ContainerRuntimePattern>) {
+  private discoverStandaloneContainerfiles(_services: DiscoveredContainerService[], patterns: Set<ContainerRuntimePattern>) {
     if (existsSync(join(this.repoPath, "Dockerfile"))) {
       patterns.add("dockerfile");
     }

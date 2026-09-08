@@ -392,7 +392,7 @@ export class ArchitectureAnalyzer {
     };
   }
 
-  private buildLevel3Component(repoName: string, manifest: Record<string, any>, maxNodes: number): ArchitectureGraph {
+  private buildLevel3Component(_repoName: string, _manifest: Record<string, any>, maxNodes: number): ArchitectureGraph {
     const nodes: ArchitectureNode[] = [];
     const edges: ArchitectureEdge[] = [];
 
@@ -557,7 +557,6 @@ export class ArchitectureAnalyzer {
       const schemaAnalyzer = new SchemaAnalyzer(this.repoPath);
       const allModels = schemaAnalyzer.discoverModels(100, false);
       const discriminators = allModels.filter((m) => m.isDiscriminator);
-      const rootModels = allModels.filter((m) => !m.isDiscriminator && !m.isSubdocument);
 
       // Add Base Polymorphic models (e.g., Match)
       const baseModelsSeen = new Set<string>();
@@ -604,7 +603,7 @@ export class ArchitectureAnalyzer {
 
     return {
       level: 3,
-      title: `${repoName} - C4 Level 3: Component Architecture`,
+      title: `${_repoName} - C4 Level 3: Component Architecture`,
       nodes,
       edges,
     };

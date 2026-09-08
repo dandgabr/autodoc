@@ -1,5 +1,4 @@
-import { RealtimeAnalyzer, DiscoveredSocketEvent } from "../realtime/index.js";
-import { RestAnalyzer } from "../rest/index.js";
+import { RealtimeAnalyzer } from "../realtime/index.js";
 import { join } from "node:path";
 import { existsSync } from "node:fs";
 import { DatabaseSync } from "node:sqlite";
@@ -25,12 +24,10 @@ export interface HonestyReport {
 export class HonestyAnalyzer {
   private repoPath: string;
   private realtimeAnalyzer: RealtimeAnalyzer;
-  private restAnalyzer: RestAnalyzer;
 
   constructor(repoPath: string = process.cwd()) {
     this.repoPath = repoPath;
     this.realtimeAnalyzer = new RealtimeAnalyzer(repoPath);
-    this.restAnalyzer = new RestAnalyzer(repoPath);
   }
 
   public generateHonestyReport(): HonestyReport {

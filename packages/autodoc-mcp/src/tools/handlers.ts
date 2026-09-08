@@ -16,7 +16,7 @@ import { getLlmEnrichment } from "../llm/enrichment.js";
 import { generateJson } from "../llm/structured.js";
 import { detectHostCapabilities } from "../llm/hardware.js";
 import { previewAutoProfile } from "../llm/enrichment.js";
-import { PROFILE_ORDER, getProfile, type ModelProfile } from "../llm/models.js";
+import { PROFILE_ORDER, getProfile } from "../llm/models.js";
 import { findLocalWeights } from "../llm/provider.js";
 import { z as _z } from "zod";
 
@@ -68,6 +68,8 @@ export const ListApiContractsSchema = z.object({
   cursor: z.string().optional(),
   includeTests: z.boolean().default(false),
   include_tests: z.boolean().optional(),
+  llm_enrich: z.boolean().optional(),
+  model_profile: z.string().optional(),
 });
 
 export const ListSocketContractsSchema = z.object({
@@ -536,15 +538,29 @@ export class AutoDocTools {
   async handleListApiContracts(args: z.infer<typeof ListApiContractsSchema>) {
     const targetRepo = this.resolveTargetRepo(args);
     const includeTests = args.include_tests ?? args.includeTests ?? false;
-    const analyzer = new RestAnalyzer(targetRepo, { includeTests });
+    const llmEnrich = args.llm_enrich ?? false;
+    const analyzer = new RestAnalyzer(targetRepo, { includeTests, llmEnrichment: llmEnrich });
     const filter = args.protocolFilter || args.protocol_filter || "ALL";
-    const contracts = analyzer.discoverEndpoints(filter, args.limit);
+    let contracts = analyzer.discoverEndpoints(filter, args.limit);
+    let enrichment: Record<string, unknown> | undefined;
+    if (llmEnrich && analyzer.pendingLlmCandidates.length > 0) {
+      const report = await analyzer.applyLlmValidation();
+      // Pass-2 may have pruned rejected candidates from the endpoint list.
+      contracts = analyzer.discoverEndpoints(filter, args.limit);
+      enrichment = {
+        llmEnriched: report.llmEnriched,
+        ...(report.model ? { model: report.model } : {}),
+        candidatesReviewed: report.candidatesReviewed,
+        candidatesRejected: report.candidatesRejected,
+      };
+    }
 
     return {
       protocolsSupported: ["REST", "SOAP", "GRPC", "GRAPHQL", "CORBA", "WCF", "FLATBUFFERS"],
       filter,
       contracts,
       total: contracts.length,
+      ...enrichment,
     };
   }
 
