@@ -3,7 +3,11 @@ use napi_derive::napi;
 use serde::{Deserialize, Serialize};
 use tracing::{error, info};
 
+pub mod cache;
 pub mod errors;
+pub mod graph;
+pub mod sanitizer;
+pub mod scanner;
 pub mod telemetry;
 
 #[global_allocator]
@@ -19,6 +23,13 @@ pub struct PingResponse {
     pub timestamp_ms: i64,
 }
 
+#[napi(object)]
+#[derive(Debug, Serialize, Deserialize)]
+pub struct SanitizeResult {
+    pub sanitized_text: String,
+    pub redaction_count: u32,
+}
+
 /// Initializes diagnostic tracing subscribers (stderr only).
 #[napi]
 pub fn init_logger() {
@@ -27,7 +38,6 @@ pub fn init_logger() {
 }
 
 /// Ping FFI Bridge sanity check passing Trace ID and ensuring memory boundary safety.
-/// Wrapped in catch_unwind to prevent unwinding panics across the C-ABI FFI boundary.
 #[napi]
 pub fn ping(trace_id: String) -> napi::Result<PingResponse> {
     let result = catch_unwind(AssertUnwindSafe(|| {
@@ -59,6 +69,39 @@ pub fn ping(trace_id: String) -> napi::Result<PingResponse> {
             Err(errors::AutoDocError::FfiPanic { reason: panic_msg }.into())
         }
     }
+}
+
+/// Native sanitization API combining Secret and PII redaction.
+#[napi]
+pub fn sanitize_content(content: String) -> napi::Result<SanitizeResult> {
+    let result = catch_unwind(AssertUnwindSafe(|| {
+        let engine = sanitizer::SanitizerEngine::new();
+        let sanitized = engine.sanitize(&content);
+        let redactions = sanitized.matches("[REDACTED_").count() as u32;
+
+        SanitizeResult {
+            sanitized_text: sanitized,
+            redaction_count: redactions,
+        }
+    }));
+
+    match result {
+        Ok(res) => Ok(res),
+        Err(payload) => {
+            let msg = if let Some(s) = payload.downcast_ref::<&str>() {
+                s.to_string()
+            } else {
+                "Panic during content sanitization".to_string()
+            };
+            Err(errors::AutoDocError::FfiPanic { reason: msg }.into())
+        }
+    }
+}
+
+/// Native Prompt Guard wrapping untrusted code in semantic delimiters.
+#[napi]
+pub fn wrap_untrusted(content: String, origin: String, file: String, symbol: String) -> String {
+    sanitizer::wrap_untrusted_code(&content, &origin, &file, &symbol)
 }
 
 /// Helper function to explicitly test panic interception via catch_unwind.

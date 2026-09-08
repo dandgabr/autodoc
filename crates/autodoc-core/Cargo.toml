@@ -19,8 +19,27 @@ tracing-subscriber.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 
+rayon.workspace = true
+tokio.workspace = true
+crossbeam-channel.workspace = true
+
+petgraph.workspace = true
+arc-swap.workspace = true
+lasso.workspace = true
+
+rusqlite.workspace = true
+r2d2.workspace = true
+r2d2_sqlite.workspace = true
+
+regex.workspace = true
+sha2.workspace = true
+twox-hash.workspace = true
+walkdir.workspace = true
+ignore.workspace = true
+
 [build-dependencies]
 napi-build.workspace = true
 
 [dev-dependencies]
 napi = { workspace = true, features = ["dyn-symbols"] }
+tempfile.workspace = true
