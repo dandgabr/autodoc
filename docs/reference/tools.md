@@ -1,6 +1,8 @@
 # Reference: MCP Tools Specification
 
-This document provides technical specifications for the nine Model Context Protocol (MCP) tools implemented in `@autodoc/mcp`.
+This document provides technical specifications for the eleven Model Context Protocol (MCP) tools implemented in `@autodoc/mcp`.
+
+Tools marked with "LLM-aware" accept optional `llm_enrich` (boolean) and `model_profile` (`small` | `mid` | `large`) arguments. With the local model configured (see [Local LLM Enrichment](../how-to/local-llm-enrichment.md)), these tools enhance their deterministic output; without a model, or on LLM failure, they return identical regex-only results with `llmEnriched: false`.
 
 ---
 
@@ -43,6 +45,10 @@ Generates interactive, XSS-free C4 diagrams in Mermaid.js or Structurizr DSL.
 | `max_nodes` | integer | No | `35` | Maximum visible nodes to prevent context window overflow. |
 | `locale` | string | No | `"en-US"` | BCP 47 locale tag (`en-US`, `pt-BR`, `es-ES`). |
 | `sanitizeOutput` | boolean | No | `true` | Neutralizes script tags, event handlers, and javascript URIs. |
+| `llm_enrich` | boolean | No | `false` | LLM-aware: refines node descriptions from graph evidence. |
+| `model_profile` | string | No | `auto` | Model profile for LLM enrichment: `small`, `mid`, `large`, or `auto`. |
+
+The response includes `llmEnriched` (boolean) and, when enrichment was applied, a `model` object (`profile`, `modelId`, `contextTokens`, `device`).
 
 ---
 
@@ -82,6 +88,7 @@ Inventories inbound and outbound service endpoints spanning 30 years of enterpri
 | `protocolFilter` | string | No | `"ALL"`, `"REST"`, `"SOAP"`, `"GRPC"`, `"GRAPHQL"`, or `"CORBA"`. |
 | `limit` | integer | No | Pagination limit (1-100, default: 50). |
 | `cursor` | string | No | Cursor for paginated traversal. |
+| `include_tests` | boolean | No | `false` | Whether to include test suites and mock files in discovery. |
 
 ---
 
@@ -96,6 +103,10 @@ Synthesizes an Architecture Decision Record in Markdown format following the MAD
 | `decision` | string | Yes | Accepted decision statement. |
 | `context` | string | No | Problem background and drivers. |
 | `locale` | string | No | Target locale for document headers (default: `en-US`). |
+| `llm_enrich` | boolean | No | `false` | LLM-aware: synthesizes elaborate Context/Decision/Consequences from the seed; falls back to the deterministic template when the LLM is unavailable. |
+| `model_profile` | string | No | `auto` | Model profile for LLM enrichment. |
+
+When enrichment succeeds, the response includes `llmEnriched: true` and a `model` object, and the ADR body contains a `## Consequences` section derived from the seed evidence.
 
 ---
 
@@ -174,6 +185,71 @@ Truncates and vacuums local SQLite cache files to comply with GDPR/LGPD Right to
 
 ---
 
+## 10. `autodoc_export_openapi`
+
+Compiles a complete OpenAPI 3.1 contract from static code analysis: path/query parameters, request bodies (Zod, Pydantic, DTOs, Go structs), response schemas from handler literals, security schemes, and `$ref` components from the SchemaAnalyzer. See [ADR-005](../decisions/adr-005-openapi-contract-compiler.md).
+
+### Parameters
+| Name | Type | Required | Default | Description |
+| :--- | :--- | :--- | :--- | :--- |
+| `repoPath` | string | No | Last scanned repo | Target repository root. |
+| `title` | string | No | `"AutoDoc-generated API Contract"` | Info section title. |
+| `version` | string | No | `"1.0.0"` | Info section version. |
+| `serverUrl` | string | No | - | Base server URL for the `servers` block. |
+| `output_dir` | string | No | - | When set, writes `openapi.json` to disk; otherwise the document is returned inline. |
+| `include_tests` | boolean | No | `false` | Include test suites in endpoint discovery. |
+| `llm_enrich` | boolean | No | `false` | LLM-aware: adds LLM-written summaries/descriptions; structure (paths, params, $refs) remains deterministic. |
+| `model_profile` | string | No | `auto` | Model profile for LLM enrichment. |
+
+### Response Schema
+```json
+{
+  "status": "SUCCESS",
+  "openapiVersion": "3.1.0",
+  "operationsCompiled": 2,
+  "schemasEmitted": 2,
+  "document": { "openapi": "3.1.0", "paths": {}, "components": {} },
+  "llmEnriched": true
+}
+```
+
+---
+
+## 11. `autodoc_llm_status`
+
+Reports host memory/VRAM, the auto-selected local LLM profile, the active model, and availability of LLM enrichment. See [ADR-006](../decisions/adr-006-local-llm-enrichment.md) and [Local LLM Enrichment](../how-to/local-llm-enrichment.md).
+
+### Parameters
+| Name | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| `model_profile` | string | No | Optional profile (`small`/`mid`/`large`) to probe loading with. |
+
+### Response Schema
+```json
+{
+  "hardware": {
+    "device": "cuda",
+    "totalRamGb": 31.1,
+    "freeRamGb": 18.4,
+    "freeVramGb": 5.5,
+    "detectedVia": ["os.freemem", "nvidia-smi"]
+  },
+  "autoSelectedProfile": "large",
+  "activeModel": {
+    "profile": "small",
+    "modelId": "Qwen2.5-Coder-3B-Instruct",
+    "contextTokens": 16384,
+    "device": "cpu"
+  },
+  "llmEnrichedAvailable": true,
+  "availableProfiles": [
+    { "profile": "small", "modelId": "Qwen2.5-Coder-3B-Instruct", "totalBudgetGb": 3, "localWeights": "/path/.autodoc/models/model.gguf" }
+  ]
+}
+```
+
+---
+
 ## Error Taxonomy
 
 AutoDoc returns structured error codes across native FFI and MCP layers:
@@ -186,3 +262,5 @@ AutoDoc returns structured error codes across native FFI and MCP layers:
 | `AUTODOC_E301` | Core / Graph | Node or edge not found in Petgraph. |
 | `AUTODOC_E401` | FFI Bridge | Native panic intercepted via `catch_unwind`. |
 | `AUTODOC_E501` | MCP Protocol | Invalid parameters or rejected operation. |
+| `AUTODOC_LLM_E400` | LLM Layer | Unknown model profile (expected `small`, `mid`, `large`, or `auto`). |
+| `AUTODOC_LLM_E404` | LLM Layer | No local GGUF weights found or model file missing; deterministic fallback applies. |

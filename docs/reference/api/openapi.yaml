@@ -385,6 +385,125 @@ paths:
               schema:
                 $ref: '#/components/schemas/PurgeCacheResponse'
 
+  /export/openapi:
+    post:
+      summary: Compile OpenAPI 3.1 Contract
+      description: |
+        Compiles a complete OpenAPI 3.1 document from static code analysis:
+        parameters, request bodies, response schemas, security schemes and
+        $ref components. Optional LLM enrichment adds summaries/descriptions
+        while structure remains deterministic.
+      operationId: exportOpenApi
+      tags:
+        - Documentation
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                repository_path:
+                  type: string
+                  description: Target repository path (defaults to last scanned path).
+                title:
+                  type: string
+                  description: API title for the info section.
+                version:
+                  type: string
+                  description: API version for the info section.
+                server_url:
+                  type: string
+                  description: Base server URL for the contract.
+                output_dir:
+                  type: string
+                  description: When set, writes openapi.json to disk; otherwise returns the document inline.
+                include_tests:
+                  type: boolean
+                  default: false
+                llm_enrich:
+                  type: boolean
+                  default: false
+                model_profile:
+                  type: string
+                  enum: [small, mid, large]
+      responses:
+        '200':
+          description: Compiled OpenAPI document.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: "SUCCESS"
+                  openapiVersion:
+                    type: string
+                    example: "3.1.0"
+                  operationsCompiled:
+                    type: integer
+                  schemasEmitted:
+                    type: integer
+                  document:
+                    type: object
+                    additionalProperties: true
+                  llmEnriched:
+                    type: boolean
+
+  /llm/status:
+    get:
+      summary: Local LLM Enrichment Status
+      description: |
+        Reports host memory/VRAM, the auto-selected local LLM profile
+        (small/mid/large), the active model, and enrichment availability.
+      operationId: llmStatus
+      tags:
+        - System
+      parameters:
+        - name: model_profile
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [small, mid, large]
+      responses:
+        '200':
+          description: LLM enrichment status report.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  hardware:
+                    type: object
+                    properties:
+                      device:
+                        type: string
+                      totalRamGb:
+                        type: number
+                      freeRamGb:
+                        type: number
+                      freeVramGb:
+                        type: [number, "null"]
+                  autoSelectedProfile:
+                    type: [string, "null"]
+                    enum: [small, mid, large, "null"]
+                  activeModel:
+                    type: object
+                    nullable: true
+                    properties:
+                      profile:
+                        type: string
+                      modelId:
+                        type: string
+                      contextTokens:
+                        type: integer
+                      device:
+                        type: string
+                  llmEnrichedAvailable:
+                    type: boolean
+
 components:
   securitySchemes:
     BearerAuth:

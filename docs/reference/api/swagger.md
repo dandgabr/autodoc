@@ -20,6 +20,8 @@ The formal OpenAPI 3.1.0 specification is available in YAML format: [`docs/refer
 | `POST` | `/api/v1/export/docs` | Export Living Diátaxis Documentation | `Documentation` |
 | `POST` | `/api/v1/adr` | Synthesize Architecture Decision Record | `Decisions` |
 | `DELETE` | `/api/v1/cache` | Purge and Vacuum Local Cache | `Cache` |
+| `POST` | `/api/v1/export/openapi` | Compile OpenAPI 3.1 Contract | `Documentation` |
+| `GET` | `/api/v1/llm/status` | Local LLM Enrichment Status | `System` |
 
 ---
 

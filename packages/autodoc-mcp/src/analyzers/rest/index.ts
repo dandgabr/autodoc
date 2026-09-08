@@ -1,6 +1,7 @@
 import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { join, extname, basename, dirname } from "node:path";
 import { isIgnoredDirectory, isTestPath } from "../utils.js";
+import { LlmCandidateFilter, type EnrichmentReport } from "../llm-candidate-filter.js";
 
 export interface DiscoveredEndpoint {
   endpoint: string;
@@ -9,10 +10,13 @@ export interface DiscoveredEndpoint {
   auth?: string;
   sourceFile?: string;
   handler?: string;
+  confidence?: "regex" | "llm-verified";
 }
 
 export interface RestAnalyzerOptions {
   includeTests?: boolean;
+  /** Enable pass-2 LLM validation of ambiguous candidates (default off). */
+  llmEnrichment?: boolean;
 }
 
 interface RouteMount {
@@ -24,10 +28,43 @@ interface RouteMount {
 export class RestAnalyzer {
   private repoPath: string;
   private includeTests: boolean;
+  private llmEnrichment: boolean;
+  /** Endpoint list retained so pass-2 LLM validation can prune it. */
+  private lastEndpoints: DiscoveredEndpoint[] = [];
+  /** Ambiguous pass-1 candidates staged for optional LLM validation. */
+  public pendingLlmCandidates: Array<{ index: number; label: string; context: string }> = [];
+  public lastEnrichmentReport: EnrichmentReport = {
+    llmEnriched: false,
+    candidatesReviewed: 0,
+    candidatesRejected: 0,
+    correctionsApplied: 0,
+  };
+
+  /**
+   * Pass-2 LLM validation of ambiguous candidates. Prunes rejected
+   * endpoints from the last discovery result. Safe no-op without staged
+   * candidates.
+   */
+  public async applyLlmValidation(): Promise<EnrichmentReport> {
+    if (!this.llmEnrichment || this.pendingLlmCandidates.length === 0) {
+      return this.lastEnrichmentReport;
+    }
+    const filter = new LlmCandidateFilter(true);
+    const { verdicts, report } = await filter.validateCandidates(this.pendingLlmCandidates);
+    this.lastEnrichmentReport = report;
+    const rejected = new Set<number>();
+    verdicts.forEach((v, i) => {
+      if (!v.accepted) rejected.add(this.pendingLlmCandidates[i].index);
+    });
+    this.lastEndpoints = this.lastEndpoints.filter((_, i) => !rejected.has(i));
+    this.pendingLlmCandidates = [];
+    return report;
+  }
 
   constructor(repoPath: string = process.cwd(), options: RestAnalyzerOptions = {}) {
     this.repoPath = repoPath;
     this.includeTests = options.includeTests ?? false;
+    this.llmEnrichment = options.llmEnrichment ?? false;
   }
 
   public discoverEndpoints(filterProtocol: string = "ALL", limit: number = 200, includeTests?: boolean): DiscoveredEndpoint[] {
@@ -40,6 +77,7 @@ export class RestAnalyzer {
 
     // Pass 2: Extract endpoints from each file with mounted prefixes
     const seen = new Set<string>();
+    const ambiguous: Array<{ index: number; label: string; context: string }> = [];
 
     for (const file of sourceFiles) {
       const content = readFileSync(file, "utf-8");
@@ -73,9 +111,22 @@ export class RestAnalyzer {
         const key = `${ep.method}:${ep.endpoint}`;
         if (!seen.has(key)) {
           seen.add(key);
-          endpoints.push(ep);
+          // Heuristic ambiguity signal: no mount prefix resolved (route may
+          // be mislocated) — these are the pass-2 LLM candidates.
+          if (this.llmEnrichment && candidatePrefixes.length === 0) {
+            ambiguous.push({
+              index: endpoints.length,
+              label: `${ep.method} ${ep.endpoint}`,
+              context: content.slice(Math.max(0, content.indexOf(ep.endpoint) - 300), content.indexOf(ep.endpoint) + 500),
+            });
+          }
+          endpoints.push({ ...ep, confidence: "regex" });
         }
       }
+    }
+
+    if (this.llmEnrichment && ambiguous.length > 0) {
+      this.pendingLlmCandidates = ambiguous;
     }
 
     // Filter by protocol if requested
@@ -84,7 +135,9 @@ export class RestAnalyzer {
       result = endpoints.filter((e) => e.protocol === filterProtocol);
     }
 
-    return result.slice(0, limit);
+    result = result.slice(0, limit);
+    this.lastEndpoints = result;
+    return result;
   }
 
   private buildMountTable(sourceFiles: string[]) {

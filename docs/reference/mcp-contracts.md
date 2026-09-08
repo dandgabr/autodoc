@@ -37,7 +37,7 @@ flowchart TD
 
 ## 2. Registered MCP Tools Catalog
 
-AutoDoc registers nine native tools under the `tools/call` namespace:
+AutoDoc registers eleven native tools under the `tools/call` namespace:
 
 ```
 1. autodoc_scan_repository     -> Multi-threaded file discovery, AST parsing and LOC metrics
@@ -49,6 +49,8 @@ AutoDoc registers nine native tools under the `tools/call` namespace:
 7. autodoc_export_documentation -> Living Diátaxis documentation generation and filesystem export
 8. autodoc_generate_adr         -> Architectural Decision Record synthesis
 9. autodoc_purge_cache          -> GDPR/LGPD compliant cache compaction and vacuum
+10. autodoc_export_openapi      -> OpenAPI 3.1 contract compilation with $ref components (ADR-005)
+11. autodoc_llm_status          -> Local LLM hardware profile detection and enrichment availability (ADR-006)
 ```
 
 ---

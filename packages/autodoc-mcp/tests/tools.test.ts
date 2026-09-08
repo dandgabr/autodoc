@@ -16,7 +16,7 @@ describe("AutoDoc MCP Tools Handlers & Schemas", () => {
 
   it("should have schemas for all registered MCP tools", () => {
     const definitions = tools.getToolDefinitions();
-    expect(definitions.length).toBe(9);
+    expect(definitions.length).toBe(11);
 
     const names = definitions.map((d) => d.name);
     expect(names).toContain("autodoc_scan_repository");
@@ -25,6 +25,8 @@ describe("AutoDoc MCP Tools Handlers & Schemas", () => {
     expect(names).toContain("autodoc_trace_data_flow");
     expect(names).toContain("autodoc_list_api_contracts");
     expect(names).toContain("autodoc_list_socket_contracts");
+    expect(names).toContain("autodoc_export_openapi");
+    expect(names).toContain("autodoc_llm_status");
     expect(names).toContain("autodoc_export_documentation");
     expect(names).toContain("autodoc_generate_adr");
     expect(names).toContain("autodoc_purge_cache");

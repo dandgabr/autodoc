@@ -22,10 +22,14 @@ import {
   handleListSocketContracts,
   ExportDocumentationSchema,
   handleExportDocumentation,
+  ExportOpenApiSchema,
+  handleExportOpenApi,
   GenerateAdrSchema,
   handleGenerateAdr,
   PurgeCacheSchema,
   handlePurgeCache,
+  LlmStatusSchema,
+  handleLlmStatus,
 } from "./tools/handlers.js";
 import { loadNativeBinding } from "./binding.js";
 export { WorkspaceAnalyzer } from "./analyzers/workspace.js";
@@ -127,6 +131,31 @@ export function createServer(): Server {
           },
         },
         {
+          name: "autodoc_export_openapi",
+          description: "Compiles a complete OpenAPI 3.1 contract from static code analysis: parameters, request bodies, response schemas and security, with $ref components.",
+          inputSchema: {
+            type: "object",
+            properties: {
+              repository_path: { type: "string", description: "Target repository path (optional, defaults to last scanned path or cwd)." },
+              title: { type: "string", description: "API title for the info section." },
+              version: { type: "string", description: "API version for the info section." },
+              server_url: { type: "string", description: "Base server URL for the contract." },
+              output_dir: { type: "string", description: "Optional directory to write openapi.json to disk. When omitted the document is returned inline." },
+              include_tests: { type: "boolean", description: "Whether to include test suites and mock files (default: false)." },
+            },
+          },
+        },
+        {
+          name: "autodoc_llm_status",
+          description: "Reports host memory/VRAM, auto-selected local LLM profile (small/mid/large), active model and availability of LLM enrichment.",
+          inputSchema: {
+            type: "object",
+            properties: {
+              model_profile: { type: "string", enum: ["small", "mid", "large"], description: "Optional model profile to probe loading with." },
+            },
+          },
+        },
+        {
           name: "autodoc_export_documentation",
           description: "Synthesizes and exports complete Diátaxis living documentation set (Tutorials, How-To, Reference, Architecture) to physical disk directory.",
           inputSchema: {
@@ -184,10 +213,14 @@ export function createServer(): Server {
         return await handleListSocketContracts(ListSocketContractsSchema.parse(args || {}));
       case "autodoc_export_documentation":
         return await handleExportDocumentation(ExportDocumentationSchema.parse(args || {}));
+      case "autodoc_export_openapi":
+        return await handleExportOpenApi(ExportOpenApiSchema.parse(args || {}));
       case "autodoc_generate_adr":
         return await handleGenerateAdr(GenerateAdrSchema.parse(args || {}));
       case "autodoc_purge_cache":
         return await handlePurgeCache(PurgeCacheSchema.parse(args || {}));
+      case "autodoc_llm_status":
+        return await handleLlmStatus(LlmStatusSchema.parse(args || {}));
       default:
         throw new Error(`AUTODOC_E501: Unknown tool name: ${name}`);
     }

@@ -117,8 +117,10 @@ This catalog documents every function, method, struct, and class across the `@au
 | `handleListApiContracts`| `export async fn` | `(args: ListApiContractsInput): Promise<ApiListResult>` | Returns inventory of exposed and consumed API protocols. |
 | `handleListSocketContracts`| `export async fn` | `(args: ListSocketContractsInput): Promise<SocketListResult>` | Inventories Socket.io events, payload interfaces, and WebRTC signals. |
 | `handleExportDocumentation`| `export async fn` | `(args: ExportDocInput): Promise<ExportResult>` | Synthesizes and exports complete Diátaxis living documentation tree. |
-| `handleGenerateAdr` | `export async fn` | `(args: GenerateAdrInput): Promise<{ adr: string }>` | Synthesizes localized MADR markdown decision record. |
+| `handleGenerateAdr` | `export async fn` | `(args: GenerateAdrInput): Promise<{ adr: string }>` | Synthesizes localized MADR markdown decision record; optional LLM elaboration. |
 | `handlePurgeCache` | `export async fn` | `(args: PurgeCacheInput): Promise<PurgeResult>` | Executes SQLite purge and vacuum operations. |
+| `handleExportOpenApi` | `export async fn` | `(args: ExportOpenApiInput): Promise<OpenApiResult>` | Compiles OpenAPI 3.1 contract with parameters, bodies, responses and $ref components. |
+| `handleLlmStatus` | `export async fn` | `(args: LlmStatusInput): Promise<LlmStatusResult>` | Reports hardware capabilities, auto-selected model profile, and enrichment availability. |
 
 ---
 
@@ -161,10 +163,15 @@ This catalog documents every function, method, struct, and class across the `@au
 | Function / Class | Visibility | Signature | Description |
 | :--- | :--- | :--- | :--- |
 | `ArchitectureAnalyzer` | `export class` | `constructor(repoPath: string)` | Derives dynamic C4 Level 1-3 graphs from dependencies and SQLite. |
-| `RestAnalyzer` | `export class` | `constructor(repoPath: string)` | Discovers HTTP endpoints across Express, NestJS, FastAPI, and Spring Boot. |
+| `RestAnalyzer` | `export class` | `constructor(repoPath: string, options?)` | Discovers HTTP endpoints across Express, NestJS, FastAPI, and Spring Boot; `includeTests`, `llmEnrichment` options. |
+| `RestAnalyzer.applyLlmValidation` | `public async` | `(): Promise<EnrichmentReport>` | Pass-2 LLM pruning of ambiguous candidates staged during discovery. |
 | `RealtimeAnalyzer` | `export class` | `constructor(repoPath: string)` | Discovers Socket.io, WebSocket, and WebRTC contracts and payload types. |
 | `SchemaAnalyzer` | `export class` | `constructor(repoPath: string)` | Reverse engineers Mongoose, Prisma, and JPA models, rules, and enums. |
 | `HonestyAnalyzer` | `export class` | `constructor(repoPath: string)` | Cross-checks declared types against imperative calls for dead/orphan code. |
+| `OpenApiGenerator` | `export class` | `constructor(repoPath: string, options?)` | Compiles OAS 3.1 documents combining RestAnalyzer + SchemaAnalyzer output with $ref components. |
+| `OpenApiGenerator.compile` | `public` | `(): OpenApiExportResult` | Produces the full document plus operation/schema counts. |
+| `OpenApiGenerator.exportToDirectory` | `public` | `(outputDir: string, filename?): OpenApiExportResult` | Writes `openapi.json` to disk. |
+| `OpenApiGenerator.enrichDescriptions` | `public async` | `(): Promise<{ enrichedOperations, llmEnriched, model? }>` | LLM pass adding summaries/descriptions against static evidence. |
 
 ---
 

@@ -101,5 +101,6 @@ The server prints a JSON configuration to `stdout`. You can direct this output i
 Now that you have a working AutoDoc build:
 - Connect AutoDoc to your AI agent harness: read [How to Connect AutoDoc to AI Agents](../how-to/connect-to-agents.md).
 - Explore socket events and export living docs with `autodoc_list_socket_contracts` and `autodoc_export_documentation`.
-- Explore the complete list of 9 tools: check the [MCP Tools Reference](../reference/tools.md).
+- Explore the complete list of 11 tools: check the [MCP Tools Reference](../reference/tools.md).
+- Enable local LLM enrichment for richer contracts and documentation: read [Local LLM Enrichment](../how-to/local-llm-enrichment.md).
 - Understand how the memory-efficient hybrid engine operates: read [Hybrid Engine Architecture](../explanation/hybrid-architecture.md).

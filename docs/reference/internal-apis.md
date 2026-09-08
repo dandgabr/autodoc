@@ -258,3 +258,18 @@ The parsing subsystem operates on a tiered execution model guaranteeing Top 20 T
   - `reference/`: Catalog of REST endpoints, socket events, and data models.
   - `architecture/`: C4 diagrams, technology stack overview, and quirks/dead-code honesty reports.
 
+### 4.7. `OpenApiGenerator` (`src/analyzers/rest/openapi.ts`)
+- Compiles OpenAPI 3.1 documents by combining `RestAnalyzer` endpoint discovery with `SchemaAnalyzer` model extraction:
+  - Operation-level contract extraction (`src/analyzers/rest/operations.ts`): path/query/header parameters per framework, request bodies (Zod `z.object`, Pydantic/DTO refs, Go bind structs, `req.body` destructuring), response shapes from `res.status(n).json({...})` literals, and security schemes (bearerAuth/apiKeyAuth/basicAuth/oauth2).
+  - Handler windowing: narrows file body from route declaration to the next route declaration to prevent cross-operation leakage.
+  - Component schemas: data models mapped to `#/components/schemas` with `$ref`; unresolved refs stubbed with provenance.
+  - Optional LLM pass (`enrichDescriptions`): summaries/descriptions validated against static evidence.
+
+### 4.8. Local LLM Enrichment (`src/llm/`)
+- `models.ts`: three hardware profiles (Qwen2.5-Coder-3B, Gemma-3-4B, Qwen2.5-Coder-7B, all Q4_K_M GGUF).
+- `hardware.ts`: VRAM probe (`nvidia-smi`/`rocm-smi`) plus `os.freemem`; auto-selects the largest profile fitting min(free VRAM, free RAM) with a 15% safety margin.
+- `provider.ts`/`factory.ts`: model resolution (operator override > auto-selection > fallback) and two adapters: node-llama-cpp in-process (lazy optional import) and llama.cpp `llama-server` HTTP.
+- `structured.ts`: `generateJson` — JSON-key-constrained prompts, Zod validation, one repair retry with error feedback.
+- `enrichment.ts`: session-scoped facade with cache and graceful degradation to deterministic behavior.
+- `llm-candidate-filter.ts`: two-pass hybrid — regex pass-1 remains the source of truth; only ambiguous candidates go to LLM pass-2; LLM failure keeps pass-1 results.
+

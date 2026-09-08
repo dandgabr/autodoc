@@ -100,7 +100,7 @@ flowchart TD
     subgraph MCPServerBoundary["⚡ Container: @autodoc/mcp (TypeScript)"]
         direction TB
         JSONRPC["🔌 JSON-RPC 2.0 Transport<br/><small>StdioServerTransport handler</small>"]:::tsComp
-        ToolRouter["🧭 Tool Router & Dispatcher<br/><small>Routes requests across 9 tools</small>"]:::tsComp
+        ToolRouter["🧭 Tool Router & Dispatcher<br/><small>Routes requests across 11 tools</small>"]:::tsComp
         ZodValidator["🛡️ Schema Validator<br/><small>Strict Zod input schemas</small>"]:::tsComp
         DiagRenderer["📊 Diagram Renderer<br/><small>Mermaid & Structurizr output generator</small>"]:::tsComp
         ArchAnalyzer["🏛️ ArchitectureAnalyzer<br/><small>Dynamic C4 L1-L3 model extractor</small>"]:::tsComp

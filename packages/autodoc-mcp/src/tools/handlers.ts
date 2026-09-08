@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { join } from "node:path";
-import { existsSync } from "node:fs";
+import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { DatabaseSync } from "node:sqlite";
 import { DiagramRenderer } from "../diagrams/renderer.js";
 import { I18nManager } from "../i18n/index.js";
@@ -9,8 +9,16 @@ import { AutoDocException } from "../errors.js";
 
 import { ArchitectureAnalyzer } from "../analyzers/architecture.js";
 import { RestAnalyzer } from "../analyzers/rest/index.js";
+import { OpenApiGenerator } from "../analyzers/rest/openapi.js";
 import { RealtimeAnalyzer } from "../analyzers/realtime/index.js";
 import { DiataxisGenerator } from "../diataxis/generator.js";
+import { getLlmEnrichment } from "../llm/enrichment.js";
+import { generateJson } from "../llm/structured.js";
+import { detectHostCapabilities } from "../llm/hardware.js";
+import { previewAutoProfile } from "../llm/enrichment.js";
+import { PROFILE_ORDER, getProfile, type ModelProfile } from "../llm/models.js";
+import { findLocalWeights } from "../llm/provider.js";
+import { z as _z } from "zod";
 
 // Zod schemas
 export const ScanRepositorySchema = z.object({
@@ -28,6 +36,8 @@ export const GetC4DiagramSchema = z.object({
   format: z.enum(["mermaid", "structurizr"]).default("mermaid"),
   locale: z.string().default("en-US"),
   sanitizeOutput: z.boolean().default(true),
+  llm_enrich: z.boolean().optional(),
+  model_profile: z.string().optional(),
 });
 
 export const GetSymbolContractSchema = z.object({
@@ -79,12 +89,32 @@ export const ExportDocumentationSchema = z.object({
   include_tests: z.boolean().optional(),
 });
 
+export const ExportOpenApiSchema = z.object({
+  repoPath: z.string().optional(),
+  repository_path: z.string().optional(),
+  title: z.string().optional(),
+  version: z.string().optional(),
+  serverUrl: z.string().optional(),
+  outputDir: z.string().optional(),
+  output_dir: z.string().optional(),
+  includeTests: z.boolean().default(false),
+  include_tests: z.boolean().optional(),
+  llm_enrich: z.boolean().optional(),
+  model_profile: z.string().optional(),
+});
+
 export const GenerateAdrSchema = z.object({
   title: z.string().optional(),
   topic: z.string().optional(),
   context: z.string().optional(),
   decision: z.string(),
   locale: z.string().default("en-US"),
+  llm_enrich: z.boolean().optional(),
+  model_profile: z.string().optional(),
+});
+
+export const LlmStatusSchema = z.object({
+  model_profile: z.string().optional(),
 });
 
 export const PurgeCacheSchema = z.object({
@@ -127,6 +157,8 @@ export class AutoDocTools {
       { name: "autodoc_trace_data_flow", schema: TraceDataFlowSchema },
       { name: "autodoc_list_api_contracts", schema: ListApiContractsSchema },
       { name: "autodoc_list_socket_contracts", schema: ListSocketContractsSchema },
+      { name: "autodoc_export_openapi", schema: ExportOpenApiSchema },
+      { name: "autodoc_llm_status", schema: LlmStatusSchema },
       { name: "autodoc_export_documentation", schema: ExportDocumentationSchema },
       { name: "autodoc_generate_adr", schema: GenerateAdrSchema },
       { name: "autodoc_purge_cache", schema: PurgeCacheSchema },
@@ -175,6 +207,10 @@ export class AutoDocTools {
   }
 
   async handleGetC4Diagram(args: z.infer<typeof GetC4DiagramSchema>) {
+    if (args.llm_enrich) {
+      const refined = await this.refineC4Diagram(args);
+      if (refined) return refined;
+    }
     const targetRepo = this.resolveTargetRepo(args);
     const analyzer = new ArchitectureAnalyzer(targetRepo);
     const graph = analyzer.getArchitectureGraph(args.level, args.max_nodes);
@@ -197,6 +233,117 @@ export class AutoDocTools {
       format: args.format,
       diagram,
       sanitized: args.sanitizeOutput,
+      llmEnriched: false,
+    };
+  }
+
+  /**
+   * Pass-2 C4 refinement: LLM rewrites node descriptions and edge labels
+   * from the deterministic graph evidence. Structure (nodes/edges/layout)
+   * stays untouched and the diagram re-renders through the same validated
+   * renderer.
+   */
+  async refineC4Diagram(args: z.infer<typeof GetC4DiagramSchema>) {
+    const enrichment = await getLlmEnrichment({ profile: (args as any).model_profile });
+    if (!enrichment) return null;
+
+    const analyzer = new ArchitectureAnalyzer(this.resolveTargetRepo(args));
+    const graph = analyzer.getArchitectureGraph(args.level, args.max_nodes);
+    const evidence = graph.nodes.map((n: any) => `${n.id}: ${n.label || n.name} (${n.type || "component"})`).join("\n");
+
+    const RefineSchema = _z.object({
+      // Models sometimes wrap the list in an object; normalize below.
+      descriptions: _z.array(_z.object({ id: _z.string(), description: _z.string().max(200) })).max(50).optional(),
+    }).transform((v) => {
+      let list = v.descriptions;
+      if (!list && typeof (v as Record<string, unknown>).descriptions === "object") {
+        const raw = (v as unknown as Record<string, unknown>).descriptions;
+        if (Array.isArray(raw)) list = raw as NonNullable<typeof list>;
+      }
+      if (!Array.isArray(list)) {
+        // Accept an object map {id: description} as well.
+        const raw = (v as unknown as Record<string, unknown>).descriptions as unknown;
+        if (raw && typeof raw === "object" && !Array.isArray(raw)) {
+          list = Object.entries(raw as Record<string, string>).map(([id, description]) => ({ id, description: String(description) }));
+        }
+      }
+      return { descriptions: (list || []).slice(0, 50) };
+    });
+    const result = await generateJson(
+      enrichment.provider,
+      `Describe each architecture component in one short sentence based strictly on the evidence list.\n${evidence}`,
+      "You are a software architecture writer. Describe only what the evidence supports.",
+      RefineSchema,
+      { maxTokens: 800 }
+    );
+    if (!result.value) return null;
+
+    const descById = new Map((result.value.descriptions ?? []).map((d) => [d.id, d.description]));
+    const refinedNodes = graph.nodes.map((n: any) => ({ ...n, description: descById.get(n.id) ?? n.description }));
+    const title = graph.title || this.i18n.t("c4.containers") || "AutoDoc System Architecture";
+
+    const diagram =
+      args.format === "structurizr"
+        ? DiagramRenderer.renderStructurizrDsl(title, refinedNodes, graph.edges)
+        : DiagramRenderer.renderC4Mermaid({ level: args.level, title, nodes: refinedNodes, edges: graph.edges });
+
+    return {
+      level: args.level,
+      format: args.format,
+      diagram,
+      sanitized: args.sanitizeOutput,
+      llmEnriched: true,
+      model: enrichment.provider.model,
+    };
+  }
+
+  /**
+   * LLM-synthesized ADR: elaborates Context/Decision/Consequences from the
+   * operator-provided seed plus repo evidence. Falls back to the
+   * deterministic template when the LLM is unavailable or fails.
+   */
+  async synthesizeAdr(args: z.infer<typeof GenerateAdrSchema>) {
+    const enrichment = await getLlmEnrichment({ profile: (args as any).model_profile });
+    if (!enrichment) return null;
+
+    const AdrSchema = _z.object({
+      context: _z.string().max(2000),
+      decision: _z.string().max(2000),
+      // Models sometimes emit lists; coerce arrays of strings into prose.
+      consequences: _z.union([_z.string().max(2000), _z.array(_z.string().max(500)).max(12)]).transform((v) =>
+        Array.isArray(v) ? v.join(" ") : v
+      ),
+    });
+    const result = await generateJson(
+      enrichment.provider,
+      `Elaborate an Architectural Decision Record.\nTitle: ${args.title || args.topic || "Architectural Decision"}\nSeed context: ${args.context || "(none provided)"}\nSeed decision: ${args.decision}`,
+      "You are a staff engineer writing MADR-format ADRs. Ground every claim in the provided seed; where evidence is missing, state assumptions explicitly.",
+      AdrSchema,
+      { maxTokens: 1200 }
+    );
+    if (!result.value) return null;
+
+    const title = args.title || args.topic || "Architectural Decision";
+    const adr = [
+      `# ADR-001: ${title}`,
+      "",
+      "## Status: Accepted",
+      "",
+      "## Context",
+      result.value.context,
+      "",
+      "## Decision",
+      result.value.decision,
+      "",
+      "## Consequences",
+      result.value.consequences,
+    ].join("\n");
+
+    return {
+      title,
+      adr,
+      llmEnriched: true,
+      model: enrichment.provider.model,
     };
   }
 
@@ -416,6 +563,51 @@ export class AutoDocTools {
     };
   }
 
+  async handleExportOpenApi(args: z.infer<typeof ExportOpenApiSchema>) {
+    const targetRepo = this.resolveTargetRepo(args);
+    const includeTests = args.include_tests ?? args.includeTests ?? false;
+    const generator = new OpenApiGenerator(targetRepo, {
+      includeTests,
+      title: args.title,
+      version: args.version,
+      serverUrl: args.serverUrl,
+      llmEnrichment: args.llm_enrich ?? false,
+      modelProfile: args.model_profile,
+    });
+
+    const outputDir = args.output_dir || args.outputDir;
+    const result = generator.compile();
+    if (args.llm_enrich) {
+      await generator.enrichDescriptions();
+      // compile() must be re-invoked? No: enrichDescriptions mutates the cached document.
+    }
+    const document = (generator as unknown as { compiledDocument: Record<string, unknown> | null }).compiledDocument ?? result.document;
+    result.document = document;
+
+    if (outputDir) {
+      mkdirSync(outputDir, { recursive: true });
+      const target = join(outputDir, "openapi.json");
+      writeFileSync(target, JSON.stringify(result.document, null, 2), "utf-8");
+      return {
+        status: "SUCCESS",
+        openapiVersion: "3.1.0",
+        writtenTo: target,
+        operationsCompiled: result.operationsCompiled,
+        schemasEmitted: result.schemasEmitted,
+        llmEnriched: Boolean(args.llm_enrich),
+      };
+    }
+
+    return {
+      status: "SUCCESS",
+      openapiVersion: "3.1.0",
+      operationsCompiled: result.operationsCompiled,
+      schemasEmitted: result.schemasEmitted,
+      document: result.document,
+      llmEnriched: Boolean(args.llm_enrich),
+    };
+  }
+
   async handleExportDocumentation(args: z.infer<typeof ExportDocumentationSchema>) {
     const targetRepo = this.resolveTargetRepo(args);
     const targetDir = args.output_dir || args.outputDir || join(targetRepo, "docs");
@@ -433,6 +625,10 @@ export class AutoDocTools {
   }
 
   async handleGenerateAdr(args: z.infer<typeof GenerateAdrSchema>) {
+    if (args.llm_enrich) {
+      const synthesized = await this.synthesizeAdr(args);
+      if (synthesized) return synthesized;
+    }
     const title = args.title || args.topic || "Architectural Decision";
     const adr = [
       `# ADR-001: ${title}`,
@@ -449,6 +645,51 @@ export class AutoDocTools {
     return {
       title,
       adr,
+    };
+  }
+
+  async handleLlmStatus(args: z.infer<typeof LlmStatusSchema>) {
+    const caps = await detectHostCapabilities();
+    const autoProfile = previewAutoProfile(caps);
+    const enrichment = await getLlmEnrichment({ profile: args.model_profile });
+
+    const availableProfiles = PROFILE_ORDER.map((p) => {
+      const spec = getProfile(p);
+      const weights = findLocalWeights(spec);
+      return {
+        profile: p,
+        modelId: spec.modelId,
+        totalBudgetGb: spec.totalBudgetGb,
+        contextTokens: spec.contextTokens,
+        license: spec.license,
+        localWeights: weights ?? null,
+        fitsAuto: autoProfile === p || PROFILE_ORDER.indexOf(p) <= PROFILE_ORDER.indexOf(autoProfile ?? "small"),
+      };
+    });
+
+    return {
+      hardware: {
+        device: caps.device,
+        totalRamGb: Number((caps.totalRamBytes / 1024 ** 3).toFixed(1)),
+        freeRamGb: Number((caps.freeRamBytes / 1024 ** 3).toFixed(1)),
+        freeVramGb: caps.freeVramBytes !== undefined ? Number((caps.freeVramBytes / 1024 ** 3).toFixed(1)) : null,
+        detectedVia: caps.detectedVia,
+      },
+      autoSelectedProfile: autoProfile,
+      activeModel: enrichment
+        ? {
+            profile: enrichment.provider.model.profile,
+            modelId: enrichment.provider.model.modelId,
+            contextTokens: enrichment.provider.model.contextTokens,
+            device: enrichment.provider.model.device,
+            selectionReason: enrichment.selectionReason,
+          }
+        : null,
+      llmEnrichedAvailable: Boolean(enrichment),
+      availableProfiles,
+      note: enrichment
+        ? "LLM enrichment active. Pass model_profile (small|mid|large|auto) to any enriched tool to override."
+        : "No local model available. Deterministic (regex-only) behavior active. Set AUTODOC_LLM_MODEL=<gguf path> or download a model to docs/llm.md instructions.",
     };
   }
 
@@ -526,6 +767,16 @@ export async function handleListSocketContracts(args: z.infer<typeof ListSocketC
   };
 }
 
+export async function handleExportOpenApi(args: z.infer<typeof ExportOpenApiSchema>) {
+  const binding = loadNativeBinding();
+  const i18n = new I18nManager();
+  const tools = new AutoDocTools(binding, i18n);
+  const res = await tools.handleExportOpenApi(args);
+  return {
+    content: [{ type: "text", text: JSON.stringify(res, null, 2) }],
+  };
+}
+
 export async function handleExportDocumentation(args: z.infer<typeof ExportDocumentationSchema>) {
   const binding = loadNativeBinding();
   const i18n = new I18nManager();
@@ -543,6 +794,16 @@ export async function handleGenerateAdr(args: z.infer<typeof GenerateAdrSchema>)
   const res = await tools.handleGenerateAdr(args);
   return {
     content: [{ type: "text", text: res.adr }],
+  };
+}
+
+export async function handleLlmStatus(args: z.infer<typeof LlmStatusSchema>) {
+  const binding = loadNativeBinding();
+  const i18n = new I18nManager();
+  const tools = new AutoDocTools(binding, i18n);
+  const res = await tools.handleLlmStatus(args);
+  return {
+    content: [{ type: "text", text: JSON.stringify(res, null, 2) }],
   };
 }
 

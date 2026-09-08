@@ -27,7 +27,7 @@ flowchart TD
         direction TB
 
         subgraph MCPLayer["Node.js / TypeScript Host (@autodoc/mcp)"]
-            MCPServer["MCP Server (JSON-RPC 2.0 / Stdio)<br/><small>9 Tool Handlers • Zod Validation<br/>i18n • Output Sanitizer</small>"]:::mcpClass
+            MCPServer["MCP Server (JSON-RPC 2.0 / Stdio)<br/><small>11 Tool Handlers • Zod Validation<br/>i18n • Output Sanitizer<br/>Local LLM Enrichment (optional)</small>"]:::mcpClass
         end
 
         subgraph CoreLayer["Native Rust Engine (@autodoc/core via Node-API)"]
@@ -144,4 +144,14 @@ The `DiataxisGenerator` synthesizes living documentation directly from the SQLit
 - **How-To Guides**: Step-by-step guides for adding modules and endpoints.
 - **Reference**: Automated inventories of HTTP REST endpoints, WebSocket/WebRTC events, and data models.
 - **Architecture (Explanation)**: System context, container topology, and the honesty quirks report.
+
+## Optional Local LLM Enrichment Layer
+
+When a local GGUF model is configured (see [ADR-006](../decisions/adr-006-local-llm-enrichment.md)), an enrichment layer augments — never replaces — the deterministic pipeline:
+
+1. **Model resolution** (`src/llm/`): operator override > hardware auto-selection (largest profile fitting min(free VRAM, free RAM), 15% margin) > deterministic fallback.
+2. **Two-pass hybrid detection**: regex/AST pass-1 remains the source of truth; only ambiguous candidates (e.g. routes without a resolved mount prefix) go to LLM pass-2 classification.
+3. **Structured output**: schema-constrained JSON generation with Zod validation and one repair retry; unparseable output is never accepted.
+4. **Anti-hallucination boundary**: LLM output is restricted to descriptions, summaries and refinements validated against static evidence; paths, parameters, schemas and $refs always come from deterministic analysis.
+5. **Fallback guarantee**: LLM unavailability or timeout degrades every tool to identical regex-only behavior (`llmEnriched: false`).
 

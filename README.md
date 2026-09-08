@@ -31,7 +31,7 @@ flowchart TD
         direction TB
 
         subgraph MCPLayer["Node.js / TypeScript Host (@autodoc/mcp)"]
-            MCPServer["🔌 MCP Server (JSON-RPC 2.0 / Stdio)<br/><small>• Tool Dispatcher (7 Tools) & Resources<br/>• Zod Schema Validation & i18n Engine<br/>• Prompt Guard & Output XSS Sanitizer</small>"]:::mcpClass
+            MCPServer["🔌 MCP Server (JSON-RPC 2.0 / Stdio)<br/><small>• Tool Dispatcher (11 Tools) & Resources<br/>• Zod Schema Validation & i18n Engine<br/>• Local LLM Enrichment (≤5 GB, optional)<br/>• Prompt Guard & Output XSS Sanitizer</small>"]:::mcpClass
         end
 
         subgraph CoreLayer["Native Rust Engine (@autodoc/core via Node-API)"]
@@ -66,6 +66,7 @@ flowchart TD
   - **Context Denial of Wallet (OWASP LLM10)**: Prunes call graphs using PageRank centrality down to 35 key nodes.
   - **Modular PII & Secret Scrubbing**: Redacts 30+ credential patterns, high-entropy tokens ($H \ge 4.5$), and extensible PII catalogs (LATAM, EU, US, FinTech, Healthcare).
 - **Extensible Localization**: Ships with `en-US`, `pt-BR`, and `es-ES`, supporting dynamic registration for additional languages (`fr-FR`, `de-DE`, `ja-JP`).
+- **Optional Local LLM Enrichment (≤5 GB)**: Hardware-adaptive model profiles (Qwen2.5-Coder-3B/7B, Gemma-3-4B, all Q4_K_M) augment contract compilation, diagram descriptions and ADR synthesis via `node-llama-cpp` or `llama-server`, with schema-validated structured output and deterministic regex-only fallback.
 - **Permissive Open-Source Licensing**: 100% MIT-licensed with zero copyleft dependencies, verified automatically by `cargo-deny` and `license-checker`.
 
 ---
@@ -160,14 +161,18 @@ Add to `.cursor/mcp.json`:
 | Tool | Purpose |
 | :--- | :--- |
 | `autodoc_scan_repository` | Scans repository structure, polyglot languages, and LOC metrics. |
-| `autodoc_get_c4_diagram` | Generates sanitized C4 Level 1 to 4 diagrams in Mermaid.js or Structurizr DSL. |
+| `autodoc_get_c4_diagram` | Generates sanitized C4 Level 1 to 4 diagrams in Mermaid.js or Structurizr DSL. LLM-aware description refinement. |
 | `autodoc_get_symbol_contract` | Extracts symbol signature wrapped in semantic prompt defense boundaries. |
 | `autodoc_trace_data_flow` | Traces taint data flows from entrypoint sources to storage sinks. |
 | `autodoc_list_api_contracts` | Inventories service endpoints (REST, SOAP, gRPC, CORBA). |
 | `autodoc_list_socket_contracts` | Discovers Socket.io, WebSocket events, typed payloads, and WebRTC signals. |
 | `autodoc_export_documentation` | Exports living Diátaxis documentation (Tutorials, How-To, Reference, Architecture). |
-| `autodoc_generate_adr` | Synthesizes Architectural Decision Records in MADR Markdown format. |
+| `autodoc_export_openapi` | Compiles a complete OpenAPI 3.1 contract (parameters, request/response schemas, security, $refs) from static analysis. |
+| `autodoc_generate_adr` | Synthesizes Architectural Decision Records in MADR Markdown format. LLM-aware elaboration. |
+| `autodoc_llm_status` | Reports host memory, auto-selected local LLM profile, and enrichment availability. |
 | `autodoc_purge_cache` | Purges and vacuums SQLite cache to comply with GDPR/LGPD. |
+
+Tools flagged as **LLM-aware** accept `llm_enrich` and `model_profile` arguments; they enhance deterministic output with a local model (≤5 GB) and fall back to regex-only behavior when no model is available. See [Local LLM Enrichment](docs/how-to/local-llm-enrichment.md).
 
 ---
 
@@ -179,6 +184,7 @@ Comprehensive documentation adhering to the **Diátaxis Framework** is available
   - [Connect AutoDoc to AI Agents](docs/how-to/connect-to-agents.md)
   - [Configure and Extend PII Scrubbing](docs/how-to/configure-pii-scrubbing.md)
   - [Add Custom Locales](docs/how-to/custom-locales.md)
+  - [Local LLM Enrichment](docs/how-to/local-llm-enrichment.md)
 - **Reference**:
   - [MCP Protocol & Tool Contracts](docs/reference/mcp-contracts.md)
   - [REST API Contract & Swagger Spec](docs/reference/api/swagger.md)
@@ -192,6 +198,7 @@ Comprehensive documentation adhering to the **Diátaxis Framework** is available
 - **Explanation**:
   - [Why Rust and TypeScript?](docs/explanation/hybrid-architecture.md)
   - [Security and Defense-in-Depth Model](docs/explanation/security-model.md)
+- **Decision Records**: [Architecture Decision Records (ADR-001 to ADR-006)](docs/decisions/)
 
 ---
 

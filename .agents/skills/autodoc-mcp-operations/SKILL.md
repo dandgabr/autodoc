@@ -10,7 +10,7 @@ metadata:
 
 # AutoDoc MCP Operations Skill
 
-This skill equips agents with operational procedures to execute the nine core Model Context Protocol (MCP) tools provided by AutoDoc (`@autodoc/mcp`), featuring tool-agnostic workspace discovery, multi-container infrastructure detection, IoC modular REST route resolution, shared room runtime events, polymorphic schema models, and living Diátaxis documentation synthesis.
+This skill equips agents with operational procedures to execute the eleven Model Context Protocol (MCP) tools provided by AutoDoc (`@autodoc/mcp`), featuring tool-agnostic workspace discovery, multi-container infrastructure detection, IoC modular REST route resolution, shared room runtime events, polymorphic schema models, living Diátaxis documentation synthesis, OpenAPI 3.1 contract compilation, and optional local LLM enrichment (≤5 GB profiles with deterministic fallback).
 
 ---
 
@@ -42,6 +42,8 @@ Generates architectural diagrams conforming to the C4 Model hierarchy, dynamical
   - `max_nodes` (number): Range 10 to 100 (default: 35) to prevent context exhaustion.
   - `locale` (string): Target localization (`en-US`, `pt-BR`, `es-ES`).
   - `sanitizeOutput` (boolean): Default `true`. Neutralizes HTML entities and blocks script URIs.
+  - `llm_enrich` (boolean): When true and a local model is configured, refines node descriptions from graph evidence; structure and renderer remain deterministic.
+  - `model_profile` (string): `small`, `mid`, `large`, or `auto`.
 
 ### `autodoc_get_symbol_contract`
 Extracts function and class signatures enclosed in semantic defense boundaries.
@@ -97,6 +99,25 @@ Produces an Architectural Decision Record in Markdown format following the MADR 
   - `decision` (string): Accepted decision statement.
   - `context` (string): Background problem and drivers.
   - `locale` (string): Target locale (default: `en-US`).
+  - `llm_enrich` (boolean): When true and a local model is configured, synthesizes elaborate Context/Decision/Consequences from the seed; falls back to the deterministic template otherwise.
+  - `model_profile` (string): `small`, `mid`, `large`, or `auto`.
+
+### `autodoc_export_openapi`
+Compiles a complete OpenAPI 3.1 contract from static analysis: parameters, request bodies (Zod/Pydantic/DTO/Go structs), response schemas from handler literals, security schemes, and `$ref` components from the SchemaAnalyzer. Structure is deterministic; the optional LLM pass only adds summaries/descriptions.
+- **Parameters**:
+  - `repository_path` / `repoPath` (string): Target repository path.
+  - `title` (string): Info section title.
+  - `version` (string): Info section version.
+  - `serverUrl` (string): Base server URL.
+  - `outputDir` / `output_dir` (string): Writes `openapi.json` to disk when set; returns the document inline otherwise.
+  - `include_tests` (boolean): Include test suites in discovery (default `false`).
+  - `llm_enrich` (boolean): LLM-aware enrichment.
+  - `model_profile` (string): Model profile override.
+
+### `autodoc_llm_status`
+Reports host hardware (RAM/VRAM, device), the auto-selected model profile, the active model, and whether LLM enrichment is available. Use it before any `llm_enrich` call to check feasibility.
+- **Parameters**:
+  - `model_profile` (string): Optional profile probe (`small`/`mid`/`large`).
 
 ### `autodoc_purge_cache`
 Executes `PRAGMA wal_checkpoint(TRUNCATE)` and SQLite `VACUUM` to reclaim disk space.
