@@ -16,6 +16,8 @@ The formal OpenAPI 3.1.0 specification is available in YAML format: [`docs/refer
 | `GET` | `/api/v1/symbols/contract` | Extract AST Symbol Contract | `Symbols` |
 | `POST` | `/api/v1/dataflow/trace` | Trace Taint Data Flow | `Analysis` |
 | `GET` | `/api/v1/contracts` | Inventory Enterprise API Contracts | `Contracts` |
+| `GET` | `/api/v1/contracts/sockets` | Inventory Realtime Socket & WebRTC Contracts | `Contracts` |
+| `POST` | `/api/v1/export/docs` | Export Living Diátaxis Documentation | `Documentation` |
 | `POST` | `/api/v1/adr` | Synthesize Architecture Decision Record | `Decisions` |
 | `DELETE` | `/api/v1/cache` | Purge and Vacuum Local Cache | `Cache` |
 

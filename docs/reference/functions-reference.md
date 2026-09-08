@@ -54,6 +54,8 @@ This catalog documents every function, method, struct, and class across the `@au
 | `SqliteCache::insert_file` | `pub fn` | `(&self, file_path: &str, loc: u32, hash: &str) -> Result<u32, AutoDocError>` | Inserts or updates a file record. |
 | `SqliteCache::insert_symbol` | `pub fn` | `(&self, file_id: u32, fqsn: &str, kind: &str, start: u32, end: u32) -> Result<u32, AutoDocError>` | Records an indexed symbol. |
 | `SqliteCache::insert_edge` | `pub fn` | `(&self, source_id: u32, target_id: u32, weight: f32) -> Result<(), AutoDocError>` | Stores a call relationship in the `WITHOUT ROWID` edge table. |
+| `SqliteCache::insert_batch_analysis`| `pub fn` | `(&self, file_path: &str, loc: u32, hash: &str, symbols: &[ParsedSymbol]) -> Result<u32, AutoDocError>` | High-throughput atomic transaction writing file, symbols, and FTS5 tokens. |
+| `SqliteCache::write_bulk_edges` | `pub fn` | `(&self, edges: &[(u32, u32, f32)]) -> Result<(), AutoDocError>` | Bulk writes directed graph edges without lock contention. |
 | `SqliteCache::checkpoint_wal`| `pub fn` | `(&self) -> Result<(), AutoDocError>` | Executes `PRAGMA wal_checkpoint(PASSIVE)`. |
 | `SqliteCache::vacuum` | `pub fn` | `(&self) -> Result<(), AutoDocError>` | Executes `VACUUM` to compact storage. |
 
@@ -69,6 +71,18 @@ This catalog documents every function, method, struct, and class across the `@au
 | `PathGuard::normalize` | `pub fn` | `(path: &Path) -> PathBuf` | Strips `..` traversal and returns relative repository paths. |
 | `PathGuard::strip_home` | `pub fn` | `(path: &str) -> String` | Replaces `/home/<username>` with `<home>` to prevent user enumeration. |
 | `PromptGuard::wrap` | `pub fn` | `(code: &str, orig: &str, path: &str, sym: &str) -> String` | Encloses snippet in `<untrusted_code_context>` XML tags. |
+
+---
+
+### 1.6. Module: `parser/` (Polyglot AST & Complexity Engine)
+
+| Function / Symbol | Visibility | Signature | Description |
+| :--- | :--- | :--- | :--- |
+| `parse_source_file` | `pub fn` | `(path: &Path, content: &str) -> Vec<ParsedSymbol>` | Polyglot router dispatching Tier 1 AST or Tier 2/3 deterministic heuristics. |
+| `parse_ast` | `pub fn` | `(lang: &str, content: &str) -> Vec<ParsedSymbol>` | Tree-Sitter AST extractor for TS, JS, Python, Rust, Go, Java, and C/C++. |
+| `parse_heuristics` | `pub fn` | `(lang: &str, content: &str) -> Vec<ParsedSymbol>` | Deterministic regex heuristics for Top 20 TIOBE languages (SQL, C#, PHP, etc.). |
+| `calculate_cyclomatic_complexity` | `pub fn` | `(node: &tree_sitter::Node, lang: &str) -> u32` | AST-based cyclomatic complexity calculator ($CC = 1 + \text{decisions}$). |
+| `calculate_text_complexity` | `pub fn` | `(code: &str) -> u32` | Text-based control flow branching complexity calculator. |
 
 ---
 
@@ -101,6 +115,8 @@ This catalog documents every function, method, struct, and class across the `@au
 | `handleGetSymbolContract` | `export async fn`| `(args: GetSymbolContractInput): Promise<ContractResult>` | Extracts symbol signature wrapped in prompt security boundary. |
 | `handleTraceDataFlow` | `export async fn` | `(args: TraceDataFlowInput): Promise<DataFlowResult>` | Traces taint path across call graph from source to sink. |
 | `handleListApiContracts`| `export async fn` | `(args: ListApiContractsInput): Promise<ApiListResult>` | Returns inventory of exposed and consumed API protocols. |
+| `handleListSocketContracts`| `export async fn` | `(args: ListSocketContractsInput): Promise<SocketListResult>` | Inventories Socket.io events, payload interfaces, and WebRTC signals. |
+| `handleExportDocumentation`| `export async fn` | `(args: ExportDocInput): Promise<ExportResult>` | Synthesizes and exports complete Diátaxis living documentation tree. |
 | `handleGenerateAdr` | `export async fn` | `(args: GenerateAdrInput): Promise<{ adr: string }>` | Synthesizes localized MADR markdown decision record. |
 | `handlePurgeCache` | `export async fn` | `(args: PurgeCacheInput): Promise<PurgeResult>` | Executes SQLite purge and vacuum operations. |
 
@@ -137,3 +153,25 @@ This catalog documents every function, method, struct, and class across the `@au
 | `Logger.warn` | `public static` | `(msg: string): void` | Writes formatted warning log to `process.stderr`. |
 | `Logger.error` | `public static` | `(msg: string): void` | Writes formatted error log to `process.stderr`. |
 | `AutoDocException` | `export class` | `constructor(code, msg, details?)` | Typed exception embedding standardized `AUTODOC_Exxx` error codes. |
+
+---
+
+### 2.7. Module: `src/analyzers/` (Static & Dynamic Analysis Suite)
+
+| Function / Class | Visibility | Signature | Description |
+| :--- | :--- | :--- | :--- |
+| `ArchitectureAnalyzer` | `export class` | `constructor(repoPath: string)` | Derives dynamic C4 Level 1-3 graphs from dependencies and SQLite. |
+| `RestAnalyzer` | `export class` | `constructor(repoPath: string)` | Discovers HTTP endpoints across Express, NestJS, FastAPI, and Spring Boot. |
+| `RealtimeAnalyzer` | `export class` | `constructor(repoPath: string)` | Discovers Socket.io, WebSocket, and WebRTC contracts and payload types. |
+| `SchemaAnalyzer` | `export class` | `constructor(repoPath: string)` | Reverse engineers Mongoose, Prisma, and JPA models, rules, and enums. |
+| `HonestyAnalyzer` | `export class` | `constructor(repoPath: string)` | Cross-checks declared types against imperative calls for dead/orphan code. |
+
+---
+
+### 2.8. Module: `src/diataxis/` (Living Documentation Generator)
+
+| Function / Class | Visibility | Signature | Description |
+| :--- | :--- | :--- | :--- |
+| `DiataxisGenerator` | `export class` | `constructor(repoPath: string)` | Synthesizes documentation across all four Diátaxis quadrants. |
+| `DiataxisGenerator.synthesizeFullDocumentation` | `public` | `(): GeneratedDocFile[]` | Generates system overview, quirks, HTTP, socket, and model specs in memory. |
+| `DiataxisGenerator.exportToDirectory` | `public` | `(targetDir: string): ExportSummary` | Writes the synthesized markdown files to the target directory on disk. |

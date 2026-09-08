@@ -224,6 +224,114 @@ paths:
               schema:
                 $ref: '#/components/schemas/ApiContractsResponse'
 
+  /contracts/sockets:
+    get:
+      summary: Inventory Realtime Socket & WebRTC Contracts
+      description: |
+        Discovers Socket.io events, WebSocket listeners and emitters, typed payload schemas,
+        and WebRTC signaling contracts across server and client codebases.
+      operationId: listSocketContracts
+      tags:
+        - Contracts
+      parameters:
+        - name: directionFilter
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [ALL, CLIENT_TO_SERVER, SERVER_TO_CLIENT, BIDIRECTIONAL]
+            default: ALL
+          description: Filter by event direction.
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 200
+            default: 50
+        - name: cursor
+          in: query
+          required: false
+          schema:
+            type: string
+      responses:
+        '200':
+          description: List of realtime socket contracts.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  protocolsSupported:
+                    type: array
+                    items:
+                      type: string
+                  directionFilter:
+                    type: string
+                  contracts:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        eventName:
+                          type: string
+                        direction:
+                          type: string
+                        protocol:
+                          type: string
+                        payloadType:
+                          type: string
+                        isTypedContract:
+                          type: boolean
+                        sourceFile:
+                          type: string
+                  total:
+                    type: integer
+
+  /export/docs:
+    post:
+      summary: Export Living Diátaxis Documentation
+      description: |
+        Synthesizes technical documentation structured across Tutorials, How-To, Reference,
+        and Architecture directly from the SQLite graph and writes markdown files to disk.
+      operationId: exportDocumentation
+      tags:
+        - Documentation
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                outputDir:
+                  type: string
+                  default: "./docs"
+                includeSourceRef:
+                  type: boolean
+                  default: true
+      responses:
+        '200':
+          description: Documentation exported successfully.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                  targetDirectory:
+                    type: string
+                  filesGenerated:
+                    type: integer
+                  files:
+                    type: array
+                    items:
+                      type: string
+                  message:
+                    type: string
+
   /adr:
     post:
       summary: Synthesize Architectural Decision Record

@@ -88,6 +88,8 @@ flowchart TD
       pub total_loc: u32,
       pub languages: Vec<String>,
       pub pii_redactions: u32,
+      pub total_symbols: u32,
+      pub total_edges: u32,
   }
   ```
 
@@ -211,3 +213,48 @@ pub struct CompactNode {
 - **`PathGuard` (`path_guard.rs`)**: Canonicalizes file paths, neutralizes directory traversal sequences (`../`), and strips home directory roots (`/home/<user>/...` $\to$ `<home>/...`) to protect user privacy.
 - **`PromptGuard` (`prompt_guard.rs`)**: Defends against indirect prompt injection by isolating external code inside `<untrusted_code_context>` tags.
 - **`Scrubber` (`secret_scanner.rs`)**: Applies high-speed regular expressions (ReDoS-free) and Shannon entropy tests to prevent credentials and PII from being indexed or emitted.
+
+---
+
+### 3.4. Polyglot AST Engine (`crates/autodoc-core/src/parser/`)
+The parsing subsystem operates on a tiered execution model guaranteeing Top 20 TIOBE language coverage:
+- **Tier 1 (Tree-Sitter AST, `ast.rs`)**:
+  - Leverages concrete syntax trees for TypeScript, JavaScript, Python, Rust, Go, Java, and C/C++.
+  - Extracts full symbol metadata: canonical identifier names, parameter lists, return types, docstrings, and line bounds.
+- **Tier 2/3 (Deterministic Heuristics, `heuristics.rs`)**:
+  - Employs deterministic regex patterns for SQL (DDL tables, views, stored procedures), C#, PHP, Ruby, Kotlin, Swift, R, Fortran, Delphi, MATLAB, Perl, Visual Basic, and Bash.
+- **Complexity Analyzer (`complexity.rs`)**:
+  - Computes cyclomatic complexity ($CC = 1 + \text{decision points}$) by scanning control flow branching constructs (`if`, `for`, `while`, `catch`, `&&`, `||`, `match`, `case`).
+
+---
+
+## 4. TypeScript Analysis Subsystems (`packages/autodoc-mcp/src/`)
+
+### 4.1. `ArchitectureAnalyzer` (`src/analyzers/architecture.ts`)
+- Dynamically inspects `package.json` dependencies (MongoDB, Redis, Express, NestJS, OAuth) and queries `.autodoc/cache.db` symbols and edges to build dynamic C4 Models:
+  - **Level 1 (System Context)**: Identifies external user personas, third-party auth providers, and databases.
+  - **Level 2 (Containers)**: Identifies web clients, API gateways, background workers, and persistence backends.
+  - **Level 3 (Components)**: Synthesizes internal component nodes from high-complexity classes and functions, mapping actual call graph edges between them.
+
+### 4.2. `RestAnalyzer` (`src/analyzers/rest/index.ts`)
+- Extracts HTTP routes from Express/Koa (`app.get`, `router.post`), NestJS controller decorators (`@Controller`, `@Get`, `@Post`, `@UseGuards`), FastAPI, and Spring Boot annotations.
+
+### 4.3. `RealtimeAnalyzer` (`src/analyzers/realtime/index.ts`)
+- Parses Socket.io typed contracts (`ClientToServerEvents`, `ServerToClientEvents`), imperative event emissions/listeners (`socket.on`, `socket.emit`, `io.to().emit`), and WebRTC signaling contracts (`webrtc:offer`, `webrtc:answer`, `webrtc:candidate`).
+
+### 4.4. `SchemaAnalyzer` (`src/analyzers/schema/index.ts`)
+- Reverse engineers data models and field contracts from Mongoose schemas (`new Schema({ ... })`), Prisma files (`schema.prisma`), and JPA `@Entity` classes, mapping cardinality relations (`1:1`, `1:N`, `N:N`) and domain state machine transitions.
+
+### 4.5. `HonestyAnalyzer` (`src/analyzers/honesty/index.ts`)
+- Audits system implementation against declared contracts:
+  - Detects dead declared events (declared in types but never emitted or received).
+  - Detects undeclared events (emitted in imperative code but missing from type definitions).
+  - Detects orphan function symbols (unreferenced non-entrypoint functions in SQLite graph).
+
+### 4.6. `DiataxisGenerator` (`src/diataxis/generator.ts`)
+- Synthesizes living technical documentation structured across the 4 Diátaxis quadrants:
+  - `tutorials/`: Getting started guides.
+  - `how-to/`: Task-oriented guides for adding modules and endpoints.
+  - `reference/`: Catalog of REST endpoints, socket events, and data models.
+  - `architecture/`: C4 diagrams, technology stack overview, and quirks/dead-code honesty reports.
+

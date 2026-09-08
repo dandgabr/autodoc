@@ -1,6 +1,6 @@
 # Reference: MCP Tools Specification
 
-This document provides technical specifications for the seven Model Context Protocol (MCP) tools implemented in `@autodoc/mcp`.
+This document provides technical specifications for the nine Model Context Protocol (MCP) tools implemented in `@autodoc/mcp`.
 
 ---
 
@@ -99,7 +99,70 @@ Synthesizes an Architecture Decision Record in Markdown format following the MAD
 
 ---
 
-## 7. `autodoc_purge_cache`
+## 7. `autodoc_list_socket_contracts`
+
+Discovers Socket.io events, WebSocket listeners/emitters, typed payload interfaces, and WebRTC signaling contracts across client and server source files.
+
+### Parameters
+| Name | Type | Required | Default | Description |
+| :--- | :--- | :--- | :--- | :--- |
+| `directionFilter` | string | No | `"ALL"` | Event direction: `"ALL"`, `"CLIENT_TO_SERVER"`, `"SERVER_TO_CLIENT"`, or `"BIDIRECTIONAL"`. |
+| `limit` | integer | No | `50` | Pagination limit (1-200). |
+| `cursor` | string | No | - | Cursor for paginated traversal. |
+
+### Response Schema
+```json
+{
+  "protocolsSupported": ["SOCKET_IO", "WEBRTC", "WEBSOCKET"],
+  "directionFilter": "ALL",
+  "contracts": [
+    {
+      "eventName": "webrtc:offer",
+      "direction": "BIDIRECTIONAL",
+      "payloadType": "RTCSessionDescriptionInit | RTCIceCandidateInit",
+      "sourceFile": "packages/autodoc-mcp/src/analyzers/realtime/index.ts",
+      "protocol": "WEBRTC",
+      "isTypedContract": true
+    }
+  ],
+  "total": 1
+}
+```
+
+---
+
+## 8. `autodoc_export_documentation`
+
+Synthesizes living technical documentation structured according to the Diátaxis documentation framework (Tutorials, How-To Guides, Technical Reference, and Architectural Explanation) directly from the SQLite graph and exports it to the filesystem.
+
+### Parameters
+| Name | Type | Required | Default | Description |
+| :--- | :--- | :--- | :--- | :--- |
+| `outputDir` | string | No | `"./docs"` | Directory path where Diátaxis markdown files will be written. |
+| `includeSourceRef` | boolean | No | `true` | Include source code references and line numbers in markdown files. |
+
+### Response Schema
+```json
+{
+  "status": "SUCCESS",
+  "targetDirectory": "./docs",
+  "filesGenerated": 7,
+  "files": [
+    "architecture/system-overview.md",
+    "architecture/quirks-and-dead-code.md",
+    "reference/http-endpoints.md",
+    "reference/socket-events.md",
+    "reference/data-models.md",
+    "tutorials/getting-started.md",
+    "how-to/add-new-module.md"
+  ],
+  "message": "Diátaxis living documentation successfully synthesized into ./docs"
+}
+```
+
+---
+
+## 9. `autodoc_purge_cache`
 
 Truncates and vacuums local SQLite cache files to comply with GDPR/LGPD Right to be Forgotten.
 

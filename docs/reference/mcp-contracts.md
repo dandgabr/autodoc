@@ -37,16 +37,18 @@ flowchart TD
 
 ## 2. Registered MCP Tools Catalog
 
-AutoDoc registers seven native tools under the `tools/call` namespace:
+AutoDoc registers nine native tools under the `tools/call` namespace:
 
 ```
-1. autodoc_scan_repository    -> Multi-threaded file discovery and LOC metrics
-2. autodoc_get_c4_diagram      -> C4 architectural diagram generation (Levels 1 to 4)
-3. autodoc_get_symbol_contract -> Deterministic AST signature extraction with prompt guard
-4. autodoc_trace_data_flow     -> Call graph pathfinding and taint tracing
-5. autodoc_list_api_contracts  -> Multi-decade enterprise protocol inventory
-6. autodoc_generate_adr        -> Architectural Decision Record synthesis
-7. autodoc_purge_cache         -> GDPR/LGPD compliant cache compaction and vacuum
+1. autodoc_scan_repository     -> Multi-threaded file discovery, AST parsing and LOC metrics
+2. autodoc_get_c4_diagram       -> Dynamic C4 architectural diagram generation (Levels 1 to 4)
+3. autodoc_get_symbol_contract  -> Deterministic AST signature extraction with prompt guard & CC
+4. autodoc_trace_data_flow      -> Call graph pathfinding and taint tracing
+5. autodoc_list_api_contracts   -> Multi-decade enterprise protocol inventory (REST, SOAP, gRPC)
+6. autodoc_list_socket_contracts-> Realtime WebSocket / Socket.io events and WebRTC contracts
+7. autodoc_export_documentation -> Living Diátaxis documentation generation and filesystem export
+8. autodoc_generate_adr         -> Architectural Decision Record synthesis
+9. autodoc_purge_cache          -> GDPR/LGPD compliant cache compaction and vacuum
 ```
 
 ---
@@ -315,7 +317,106 @@ Returns an inventory of exposed and consumed API endpoints across modern and leg
 
 ---
 
-### 3.6. `autodoc_generate_adr`
+### 3.6. `autodoc_list_socket_contracts`
+
+Discovers Socket.io events, WebSocket listeners and emitters, typed event payloads, and WebRTC signaling contracts across server and client source files.
+
+#### Input Schema
+```json
+{
+  "type": "object",
+  "properties": {
+    "directionFilter": {
+      "type": "string",
+      "enum": ["ALL", "CLIENT_TO_SERVER", "SERVER_TO_CLIENT", "BIDIRECTIONAL"],
+      "default": "ALL",
+      "description": "Filter by event direction."
+    },
+    "limit": {
+      "type": "integer",
+      "default": 50,
+      "minimum": 1,
+      "maximum": 200,
+      "description": "Maximum number of events to return."
+    },
+    "cursor": {
+      "type": "string",
+      "description": "Pagination cursor."
+    }
+  }
+}
+```
+
+#### Output Payload
+```json
+{
+  "protocolsSupported": ["SOCKET_IO", "WEBRTC", "WEBSOCKET"],
+  "directionFilter": "ALL",
+  "contracts": [
+    {
+      "eventName": "webrtc:offer",
+      "direction": "BIDIRECTIONAL",
+      "payloadType": "RTCSessionDescriptionInit | RTCIceCandidateInit",
+      "sourceFile": "packages/autodoc-mcp/src/analyzers/realtime/index.ts",
+      "protocol": "WEBRTC",
+      "isTypedContract": true
+    }
+  ],
+  "total": 1
+}
+```
+
+---
+
+### 3.7. `autodoc_export_documentation`
+
+Synthesizes living technical documentation structured according to the Diátaxis documentation framework (Tutorials, How-To Guides, Technical Reference, and Architectural Explanation) directly from the SQLite graph and exports it to the filesystem.
+
+#### Input Schema
+```json
+{
+  "type": "object",
+  "properties": {
+    "outputDir": {
+      "type": "string",
+      "default": "./docs",
+      "description": "Destination directory for generated Diátaxis markdown documents."
+    },
+    "output_dir": {
+      "type": "string",
+      "description": "Alias for outputDir."
+    },
+    "includeSourceRef": {
+      "type": "boolean",
+      "default": true,
+      "description": "Include source code references in generated documents."
+    }
+  }
+}
+```
+
+#### Output Payload
+```json
+{
+  "status": "SUCCESS",
+  "targetDirectory": "./docs",
+  "filesGenerated": 7,
+  "files": [
+    "architecture/system-overview.md",
+    "architecture/quirks-and-dead-code.md",
+    "reference/http-endpoints.md",
+    "reference/socket-events.md",
+    "reference/data-models.md",
+    "tutorials/getting-started.md",
+    "how-to/add-new-module.md"
+  ],
+  "message": "Diátaxis living documentation successfully synthesized into ./docs"
+}
+```
+
+---
+
+### 3.8. `autodoc_generate_adr`
 
 Synthesizes an Architecture Decision Record in Markdown adhering to the MADR standard, translated according to the requested locale.
 
@@ -348,7 +449,7 @@ Synthesizes an Architecture Decision Record in Markdown adhering to the MADR sta
 
 ---
 
-### 3.7. `autodoc_purge_cache`
+### 3.9. `autodoc_purge_cache`
 
 Executes cache truncation, journal checkpointing, and vacuuming on the local SQLite storage to comply with data privacy policies and GDPR/LGPD regulations.
 

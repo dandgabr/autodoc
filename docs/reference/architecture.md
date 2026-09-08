@@ -27,7 +27,7 @@ flowchart TD
         direction TB
 
         subgraph MCPLayer["Node.js / TypeScript Host (@autodoc/mcp)"]
-            MCPServer["MCP Server (JSON-RPC 2.0 / Stdio)<br/><small>7 Tool Handlers • Zod Validation<br/>i18n • Output Sanitizer</small>"]:::mcpClass
+            MCPServer["MCP Server (JSON-RPC 2.0 / Stdio)<br/><small>9 Tool Handlers • Zod Validation<br/>i18n • Output Sanitizer</small>"]:::mcpClass
         end
 
         subgraph CoreLayer["Native Rust Engine (@autodoc/core via Node-API)"]
@@ -116,3 +116,32 @@ ON edges (target_id, kind, source_id);
 ```
 
 The `edges` table uses `WITHOUT ROWID` to eliminate the secondary B-Tree lookup overhead. The `idx_edges_incoming_covering` index resolves reverse dependency and call graph traversals directly from the index tree.
+
+---
+
+## Polyglot AST Engine & Top 20 TIOBE Parsing
+
+AutoDoc employs a tiered static parsing architecture:
+1. **Tier 1 (Tree-Sitter Concrete Syntax Trees)**: High-traffic languages (TypeScript, JavaScript, Python, Rust, Go, Java, C/C++) compile tree-sitter grammars directly in the Rust core, extracting exact function definitions, method boundaries, parameter types, return signatures, and docstrings.
+2. **Tier 2/3 (Deterministic Regex Heuristics)**: Languages such as SQL (tables, views, procedures), C#, PHP, Ruby, Kotlin, Swift, R, Fortran, Delphi, MATLAB, Perl, Visual Basic, and Bash use precompiled regex heuristics to extract symbol contracts without requiring dozens of external native libraries.
+3. **Cyclomatic Complexity**: Measures control flow branching complexity ($CC = 1 + \text{decision points}$) by scanning `if`, `for`, `while`, `catch`, `&&`, `||`, `match`, and `case` tokens, weighting key components in C4 Level 3 diagrams.
+
+---
+
+## Dynamic C4 Synthesis & Realtime Contract Discovery
+
+- **Level 1 (System Context)**: Discovers system boundary, actors, external identity providers, and remote database nodes.
+- **Level 2 (Containers)**: Identifies web clients, API gateways, worker pools, and persistence engines by inspecting `package.json` dependencies and source manifests.
+- **Level 3 (Components)**: Synthesizes internal component nodes directly from SQLite `symbols` and `edges`, rendering real internal call relationships with sanitized identifiers and WCAG 2.1 AA visual contrast.
+- **Realtime Protocols**: The `RealtimeAnalyzer` inspects Socket.io typed interfaces (`ClientToServerEvents`, `ServerToClientEvents`), imperative socket emissions (`socket.on`, `socket.emit`), and WebRTC signaling contracts (`webrtc:offer`, `webrtc:answer`, `webrtc:candidate`).
+
+---
+
+## Living Diátaxis Documentation Generation
+
+The `DiataxisGenerator` synthesizes living documentation directly from the SQLite graph, partitioned into the four Diátaxis quadrants:
+- **Tutorials**: Onboarding and quickstart walkthroughs.
+- **How-To Guides**: Step-by-step guides for adding modules and endpoints.
+- **Reference**: Automated inventories of HTTP REST endpoints, WebSocket/WebRTC events, and data models.
+- **Architecture (Explanation)**: System context, container topology, and the honesty quirks report.
+

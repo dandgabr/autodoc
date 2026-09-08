@@ -37,7 +37,7 @@ Add the `autodoc` entry to your `claude_desktop_config.json`:
 }
 ```
 
-Restart Claude Desktop. The hammer icon in the prompt window displays all seven AutoDoc tools.
+Restart Claude Desktop. The hammer icon in the prompt window displays all nine AutoDoc tools.
 
 ---
 

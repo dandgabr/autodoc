@@ -80,7 +80,7 @@ cargo test -p autodoc-core
 npm test -w @autodoc/mcp
 ```
 
-All 17 Rust tests and 35 TypeScript tests should pass cleanly.
+All Rust tests and 42 TypeScript tests should pass cleanly.
 
 ---
 
@@ -100,5 +100,6 @@ The server prints a JSON configuration to `stdout`. You can direct this output i
 
 Now that you have a working AutoDoc build:
 - Connect AutoDoc to your AI agent harness: read [How to Connect AutoDoc to AI Agents](../how-to/connect-to-agents.md).
-- Explore the complete list of tools: check the [MCP Tools Reference](../reference/tools.md).
+- Explore socket events and export living docs with `autodoc_list_socket_contracts` and `autodoc_export_documentation`.
+- Explore the complete list of 9 tools: check the [MCP Tools Reference](../reference/tools.md).
 - Understand how the memory-efficient hybrid engine operates: read [Hybrid Engine Architecture](../explanation/hybrid-architecture.md).

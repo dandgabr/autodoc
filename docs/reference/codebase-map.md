@@ -6,10 +6,12 @@ This document presents the self-mapped architectural topology of the AutoDoc rep
 
 ## Repository Metrics
 
-- **Total Source Files Scanned**: 35 (excluding ignored directories, tests artifacts, and third-party dependencies)
-- **Total Lines of Code (LOC)**: ~3,253 LOC
+- **Total Source Files Scanned**: 47 (excluding ignored directories, tests artifacts, and third-party dependencies)
+- **Total Lines of Code (LOC)**: ~5,676 LOC
 - **Primary Languages**: Rust (`rs`), TypeScript (`ts`)
-- **Engine**: NAPI-RS / Rayon Work-Stealing Multi-Threading
+- **Total AST Symbols Indexed**: 224 symbols
+- **Total Call Graph Edges**: 68 edges
+- **Engine**: NAPI-RS / Rayon Work-Stealing Multi-Threading & Tree-Sitter Polyglot AST
 - **Cache Location**: `.autodoc/cache.db` (SQLite in WAL mode)
 - **PII / Secret Scrubbing**: Active (0 credentials or unmasked tokens persisted)
 
@@ -98,19 +100,24 @@ flowchart TD
     subgraph MCPServerBoundary["⚡ Container: @autodoc/mcp (TypeScript)"]
         direction TB
         JSONRPC["🔌 JSON-RPC 2.0 Transport<br/><small>StdioServerTransport handler</small>"]:::tsComp
-        ToolRouter["🧭 Tool Router & Dispatcher<br/><small>Routes requests across 7 tools</small>"]:::tsComp
+        ToolRouter["🧭 Tool Router & Dispatcher<br/><small>Routes requests across 9 tools</small>"]:::tsComp
         ZodValidator["🛡️ Schema Validator<br/><small>Strict Zod input schemas</small>"]:::tsComp
         DiagRenderer["📊 Diagram Renderer<br/><small>Mermaid & Structurizr output generator</small>"]:::tsComp
-        I18nEngine["🌐 i18n Localization<br/><small>en-US • pt-BR • es-ES catalogs</small>"]:::tsComp
+        ArchAnalyzer["🏛️ ArchitectureAnalyzer<br/><small>Dynamic C4 L1-L3 model extractor</small>"]:::tsComp
+        ContractSuite["🔍 Realtime & REST Analyzers<br/><small>Socket.io • WebRTC • Express • NestJS</small>"]:::tsComp
+        DiataxisGen["📑 DiataxisGenerator<br/><small>Living documentation synthesizer</small>"]:::tsComp
+        HonestyAuditor["⚖️ HonestyAnalyzer<br/><small>Dead code & interface cross-checker</small>"]:::tsComp
         FFIBridge["🌉 Node-API Bridge<br/><small>Typed FFI wrappers & boundary</small>"]:::tsComp
     end
 
     subgraph RustCoreBoundary["⚡ Container: @autodoc/core (Rust Native)"]
         direction TB
         ScannerMod["🦀 scanner::scan_repository<br/><small>Parallel Rayon file walker & Git filter</small>"]:::rustComp
+        AstEngine["🌳 parser::ast & heuristics<br/><small>Tree-Sitter + TIOBE Top 20 parser</small>"]:::rustComp
+        ComplexityMod["🧮 parser::complexity<br/><small>Cyclomatic complexity calculator</small>"]:::rustComp
         SanitizerMod["🔒 sanitizer::Scrubber<br/><small>Shannon entropy & PII scrubbing</small>"]:::rustComp
         GraphMod["📈 graph::CallGraph<br/><small>Petgraph in-memory centrality pruning</small>"]:::rustComp
-        CacheMod["💾 cache::SqliteCache<br/><small>r2d2_sqlite connection pool</small>"]:::rustComp
+        CacheMod["💾 cache::SqliteCache<br/><small>Batch insertion & r2d2_sqlite pool</small>"]:::rustComp
     end
 
     subgraph StorageBoundary["⚡ Persistence Engine"]
@@ -122,14 +129,19 @@ flowchart TD
     JSONRPC -->|"Dispatches request"| ToolRouter
     ToolRouter -->|"Validates parameters"| ZodValidator
     ZodValidator -->|"Generates diagrams"| DiagRenderer
-    ZodValidator -->|"Formats localized responses"| I18nEngine
+    ZodValidator -->|"Synthesizes documentation"| DiataxisGen
+    DiataxisGen -->|"Audits quirks"| HonestyAuditor
+    DiataxisGen -->|"Extracts C4"| ArchAnalyzer
+    DiataxisGen -->|"Queries contracts"| ContractSuite
     ToolRouter -->|"Dispatches native compute"| FFIBridge
 
     FFIBridge -->|"Spawns parallel scan"| ScannerMod
-    FFIBridge -->|"Invokes PII scrubbing"| SanitizerMod
-    FFIBridge -->|"Queries & prunes graph"| GraphMod
+    ScannerMod -->|"Extracts AST symbols"| AstEngine
+    AstEngine -->|"Measures decision points"| ComplexityMod
+    ScannerMod -->|"Invokes PII scrubbing"| SanitizerMod
+    ScannerMod -->|"Writes batch analysis"| CacheMod
 
-    ScannerMod -->|"Filters files & passes to cache"| CacheMod
+    FFIBridge -->|"Queries & prunes graph"| GraphMod
     GraphMod -->|"Reads & writes graph state"| CacheMod
     CacheMod -->|"Executes SQL in WAL mode"| SQLiteDB
 
@@ -152,9 +164,9 @@ flowchart TD
 
     subgraph TSModels["📦 TypeScript Model Layer (@autodoc/mcp)"]
         direction TB
-        AutoDocTools["class AutoDocTools<br/><small>• handleScanRepository()<br/>• handleGetC4Diagram()<br/>• handleGetSymbolContract()<br/>• handleTraceDataFlow()<br/>• handleListApiContracts()<br/>• handleGenerateAdr()<br/>• handlePurgeCache()</small>"]:::tsClass
+        AutoDocTools["class AutoDocTools<br/><small>• handleScanRepository()<br/>• handleGetC4Diagram()<br/>• handleGetSymbolContract()<br/>• handleTraceDataFlow()<br/>• handleListApiContracts()<br/>• handleListSocketContracts()<br/>• handleExportDocumentation()<br/>• handleGenerateAdr()<br/>• handlePurgeCache()</small>"]:::tsClass
+        Analyzers["Analyzers & Synthesis<br/><small>• ArchitectureAnalyzer<br/>• RestAnalyzer<br/>• RealtimeAnalyzer<br/>• SchemaAnalyzer<br/>• HonestyAnalyzer<br/>• DiataxisGenerator</small>"]:::tsClass
         DiagramRenderer["class DiagramRenderer<br/><small>• escapeHtml()<br/>• sanitizeMermaidId()<br/>• renderC4Mermaid()<br/>• renderStructurizrDsl()</small>"]:::tsClass
-        I18nManager["class I18nManager<br/><small>• t(key, params)<br/>• setLocale(loc)<br/>• getSupportedLocales()</small>"]:::tsClass
     end
 
     subgraph FFIBoundary["⚡ Node-API Type Boundary (C FFI)"]
@@ -164,20 +176,18 @@ flowchart TD
 
     subgraph RustModels["📦 Rust Core Data Model (@autodoc-core)"]
         direction TB
-        CompactNode["struct CompactNode #[repr(C)]<br/><small>• file_id: u32<br/>• symbol_id: u32<br/>• kind: u8<br/>• flags: u8<br/>• start_line: u32<br/>• end_line: u32</small>"]:::rustClass
-        ScanResult["struct ScanResult #[napi(object)]<br/><small>• scanned_files: u32<br/>• total_loc: u32<br/>• languages: Vec&lt;String&gt;<br/>• pii_redactions: u32</small>"]:::rustClass
-        SanitizeResult["struct SanitizeResult #[napi(object)]<br/><small>• sanitized_text: String<br/>• redaction_count: u32</small>"]:::rustClass
-        SqliteCache["struct SqliteCache<br/><small>• pool: Pool&lt;SqliteConnectionManager&gt;<br/>• insert_file(path, loc)<br/>• insert_symbol(file_id, sym)<br/>• vacuum()</small>"]:::rustClass
+        ParsedSymbol["struct ParsedSymbol<br/><small>• name, kind, signature<br/>• cyclomatic_complexity: u32<br/>• line_start, line_end: u32</small>"]:::rustClass
+        ScanResult["struct ScanResult #[napi(object)]<br/><small>• scanned_files, total_loc<br/>• total_symbols, total_edges<br/>• languages, pii_redactions</small>"]:::rustClass
+        SqliteCache["struct SqliteCache<br/><small>• insert_batch_analysis()<br/>• write_bulk_edges()<br/>• checkpoint_wal(), vacuum()</small>"]:::rustClass
     end
 
     %% Cross-boundary relationships
     AutoDocTools -->|"Formats visual output"| DiagramRenderer
-    AutoDocTools -->|"Localizes messages"| I18nManager
+    AutoDocTools -->|"Coordinates analysis"| Analyzers
     AutoDocTools -->|"Invokes native calls via"| BridgeSignatures
 
-    BridgeSignatures -->|"Returns POD object"| ScanResult
-    BridgeSignatures -->|"Returns sanitized text"| SanitizeResult
-    BridgeSignatures -->|"Populates POD node"| CompactNode
+    BridgeSignatures -->|"Returns POD scan"| ScanResult
+    BridgeSignatures -->|"Extracts symbols"| ParsedSymbol
     BridgeSignatures -->|"Persists state with"| SqliteCache
 
     linkStyle default stroke:#94A3B8,stroke-width:2px;
@@ -185,11 +195,23 @@ flowchart TD
 
 ---
 
-## Enterprise API Contracts Inventory
+## Enterprise API & Realtime Contracts Inventory
 
-AutoDoc natively catalogs contracts across multi-decade protocols:
+AutoDoc natively catalogs contracts across multi-decade and modern realtime protocols:
 - **REST**:
   - `POST /api/v1/scan` (Auth: `Bearer`)
+  - `POST /api/v1/diagrams/c4` (Auth: `Bearer`)
+  - `GET /api/v1/symbols/contract` (Auth: `Bearer`)
+  - `POST /api/v1/dataflow/trace` (Auth: `Bearer`)
+  - `GET /api/v1/contracts` (Auth: `Bearer`)
+  - `GET /api/v1/contracts/sockets` (Auth: `Bearer`)
+  - `POST /api/v1/export/docs` (Auth: `Bearer`)
+  - `POST /api/v1/adr` (Auth: `Bearer`)
+  - `DELETE /api/v1/cache` (Auth: `Bearer`)
+- **Realtime (WebSocket & WebRTC)**:
+  - `webrtc:offer` (Direction: `BIDIRECTIONAL`, Payload: `RTCSessionDescriptionInit | RTCIceCandidateInit`)
+  - `webrtc:answer` (Direction: `BIDIRECTIONAL`, Payload: `RTCSessionDescriptionInit | RTCIceCandidateInit`)
+  - `webrtc:candidate` (Direction: `BIDIRECTIONAL`, Payload: `RTCSessionDescriptionInit | RTCIceCandidateInit`)
 - **gRPC**:
   - `AutoDocService::Ping` (Auth: `None`, Transport: HTTP/2)
 - **Extensible Protocols Supported**:
