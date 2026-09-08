@@ -29,7 +29,7 @@ flowchart TD
     end
 
     subgraph SystemBoundary["⚡ Core System Context"]
-        AutoDoc["🔌 AutoDoc System<br/><small>Code intelligence, architecture mapping, and C4 diagram generation</small>"]:::systemClass
+        AutoDoc["🔌 AutoDoc System<br/><small>Code intelligence, architecture mapping<br/>and C4 diagram generation</small>"]:::systemClass
     end
 
     Dev -->|"Requests codebase analysis"| Harness
@@ -58,11 +58,11 @@ flowchart TD
         direction TB
 
         subgraph MCPLayer["Node.js / TypeScript Host"]
-            MCPServer["🔌 @autodoc/mcp Server<br/><small>Handles tool requests, validates schemas, formats diagrams & ADRs</small>"]:::mcpClass
+            MCPServer["🔌 @autodoc/mcp Server<br/><small>Handles tool requests & schemas<br/>formats diagrams & ADRs</small>"]:::mcpClass
         end
 
         subgraph CoreLayer["Rust Native Engine"]
-            CoreEngine["🦀 @autodoc/core Engine<br/><small>Multi-threaded Rayon file discovery, Lasso interning, Petgraph pruning</small>"]:::rustClass
+            CoreEngine["🦀 @autodoc/core Engine<br/><small>Multi-threaded Rayon discovery<br/>Lasso interning • Petgraph pruning</small>"]:::rustClass
         end
 
         subgraph DBStorage["Persistence Layer"]
@@ -146,6 +146,7 @@ The Code diagram details the key types, structs, interfaces, and data models tha
 flowchart TD
     %% High Contrast Styling Definitions
     classDef tsClass fill:#1E1B4B,stroke:#818CF8,stroke-width:2px,color:#FFFFFF;
+    classDef mcpClass fill:#1E1B4B,stroke:#818CF8,stroke-width:2px,color:#FFFFFF;
     classDef rustClass fill:#311505,stroke:#FB923C,stroke-width:2px,color:#FFFFFF;
     classDef glueClass fill:#0F172A,stroke:#38BDF8,stroke-width:2px,color:#FFFFFF,font-weight:bold;
 

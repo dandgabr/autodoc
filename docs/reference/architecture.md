@@ -27,15 +27,15 @@ flowchart TD
         direction TB
 
         subgraph MCPLayer["Node.js / TypeScript Host (@autodoc/mcp)"]
-            MCPServer["MCP Server (JSON-RPC 2.0 / Stdio)<br/><small>7 Tool Handlers • Zod Validation • i18n • Output Sanitizer</small>"]:::mcpClass
+            MCPServer["MCP Server (JSON-RPC 2.0 / Stdio)<br/><small>7 Tool Handlers • Zod Validation<br/>i18n • Output Sanitizer</small>"]:::mcpClass
         end
 
         subgraph CoreLayer["Native Rust Engine (@autodoc/core via Node-API)"]
-            NativeCore["Native Engine (NAPI-RS / catch_unwind)<br/><small>Rayon Parallel Scanner • Petgraph • Lasso String Interning</small>"]:::rustClass
+            NativeCore["Native Engine (NAPI-RS / catch_unwind)<br/><small>Rayon Parallel Scanner • Petgraph<br/>Lasso String Interning</small>"]:::rustClass
         end
 
         subgraph StorageLayer["Persistence & Caching"]
-            Storage["SQLite WAL Engine (.autodoc/cache.db)<br/><small>Covering Indexes • WITHOUT ROWID • r2d2_sqlite Pool</small>"]:::dbClass
+            Storage["SQLite WAL Engine (.autodoc/cache.db)<br/><small>Covering Indexes • WITHOUT ROWID<br/>r2d2_sqlite Pool</small>"]:::dbClass
         end
     end
 
