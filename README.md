@@ -179,6 +179,7 @@ Comprehensive documentation adhering to the **Diátaxis Framework** is available
   - [Add Custom Locales](docs/how-to/custom-locales.md)
 - **Reference**:
   - [MCP Protocol & Tool Contracts](docs/reference/mcp-contracts.md)
+  - [REST API Contract & Swagger Spec](docs/reference/api/swagger.md)
   - [Internal APIs & Node-API FFI](docs/reference/internal-apis.md)
   - [Functions & Symbol Catalog](docs/reference/functions-reference.md)
   - [MCP Tools Specification](docs/reference/tools.md)

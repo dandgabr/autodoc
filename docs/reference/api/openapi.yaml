@@ -1,0 +1,572 @@
+openapi: 3.1.0
+info:
+  title: AutoDoc Code Explorer REST API
+  description: |
+    Canonical REST API specification for AutoDoc Code Explorer.
+    Exposes endpoints for repository scanning, C4 diagram generation, symbol contract extraction,
+    data flow taint tracing, protocol inventory, and privacy-compliant cache maintenance.
+  version: 0.1.0
+  contact:
+    name: Daniel Gonçalves Araujo
+    url: https://github.com/dandgabr/autodoc
+  license:
+    name: MIT
+    url: https://opensource.org/licenses/MIT
+
+servers:
+  - url: http://localhost:3000/api/v1
+    description: Local development / daemon server
+  - url: https://autodoc.internal/api/v1
+    description: Internal corporate gateway
+
+security:
+  - BearerAuth: []
+
+paths:
+  /system/ping:
+    get:
+      summary: Health & FFI Latency Check
+      description: Measures Node-API FFI bridge clock synchronization, version, and memory health.
+      operationId: pingSystem
+      tags:
+        - System
+      security: []
+      parameters:
+        - name: trace_id
+          in: query
+          required: false
+          schema:
+            type: string
+            example: "trace-91823"
+          description: Optional distributed tracing ID.
+      responses:
+        '200':
+          description: Successful bridge ping response.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PingResponse'
+        '500':
+          description: Native FFI panic intercepted or unhandled runtime failure.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /scan:
+    post:
+      summary: Trigger Repository Scan
+      description: |
+        Executes a parallel Rayon file discovery scan over the designated codebase.
+        Extracts language breakdown, LOC metrics, and updates local SQLite WAL cache.
+      operationId: scanRepository
+      tags:
+        - Scanner
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ScanRepositoryRequest'
+      responses:
+        '200':
+          description: Scan completed successfully.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ScanRepositoryResponse'
+        '400':
+          description: Invalid path, symlink loop, or schema validation error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: Missing or invalid authentication token.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /diagrams/c4:
+    post:
+      summary: Generate C4 Architectural Diagram
+      description: |
+        Renders interactive, XSS-free C4 diagrams (Levels 1 to 4) using Mermaid.js or Structurizr DSL.
+        Prunes call graphs using PageRank centrality to prevent LLM context exhaustion.
+      operationId: getC4Diagram
+      tags:
+        - Diagrams
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/GetC4DiagramRequest'
+      responses:
+        '200':
+          description: Generated C4 diagram text.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GetC4DiagramResponse'
+        '400':
+          description: Invalid zoom level or rendering format.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /symbols/contract:
+    get:
+      summary: Extract AST Symbol Contract
+      description: |
+        Retrieves a deterministic signature for a function or method from AST parsing.
+        Wraps output in `<untrusted_code_context>` XML defense boundaries to prevent prompt injection.
+      operationId: getSymbolContract
+      tags:
+        - Symbols
+      parameters:
+        - name: symbolName
+          in: query
+          required: true
+          schema:
+            type: string
+            example: "Scanner::scan_repository"
+          description: Fully Qualified Symbol Name (FQSN).
+        - name: filePath
+          in: query
+          required: false
+          schema:
+            type: string
+            example: "crates/autodoc-core/src/scanner.rs"
+          description: Relative path to source file.
+        - name: include_body
+          in: query
+          required: false
+          schema:
+            type: boolean
+            default: false
+          description: Whether to include function body (true) or skeletonize (false).
+      responses:
+        '200':
+          description: Deterministic symbol contract.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SymbolContractResponse'
+        '404':
+          description: Symbol or file not found in AST index.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /dataflow/trace:
+    post:
+      summary: Trace Taint Data Flow
+      description: |
+        Traverses the dependency and call graph to trace data flows between entrypoint sources
+        and target persistence sinks or external network interfaces.
+      operationId: traceDataFlow
+      tags:
+        - Analysis
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TraceDataFlowRequest'
+      responses:
+        '200':
+          description: Graph traversal path from source to sink.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TraceDataFlowResponse'
+
+  /contracts:
+    get:
+      summary: Inventory Enterprise API Contracts
+      description: |
+        Catalogs exposed and consumed service endpoints across multi-decade enterprise protocols
+        (REST, gRPC, SOAP, GraphQL, CORBA, WCF).
+      operationId: listApiContracts
+      tags:
+        - Contracts
+      parameters:
+        - name: protocolFilter
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [ALL, REST, SOAP, GRPC, GRAPHQL, CORBA, WCF]
+            default: ALL
+          description: Protocol filter.
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 50
+        - name: cursor
+          in: query
+          required: false
+          schema:
+            type: string
+      responses:
+        '200':
+          description: List of API contracts.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiContractsResponse'
+
+  /adr:
+    post:
+      summary: Synthesize Architectural Decision Record
+      description: Generates a standardized Markdown ADR adhering to the MADR template.
+      operationId: generateAdr
+      tags:
+        - Decisions
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/GenerateAdrRequest'
+      responses:
+        '200':
+          description: Synthesized ADR document.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GenerateAdrResponse'
+
+  /cache:
+    delete:
+      summary: Purge and Vacuum Local Cache
+      description: |
+        Truncates database tables, checkpoints WAL journal, and executes VACUUM to comply
+        with GDPR/LGPD Right to be Forgotten.
+      operationId: purgeCache
+      tags:
+        - Cache
+      parameters:
+        - name: confirm
+          in: query
+          required: true
+          schema:
+            type: boolean
+            default: true
+          description: Explicit confirmation to purge cache.
+        - name: vacuum
+          in: query
+          required: false
+          schema:
+            type: boolean
+            default: true
+          description: Reclaims filesystem disk space via VACUUM.
+      responses:
+        '200':
+          description: Cache purged successfully.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PurgeCacheResponse'
+
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: Enter valid bearer token.
+
+  schemas:
+    PingResponse:
+      type: object
+      required:
+        - trace_id
+        - status
+        - version
+        - rustc_version
+        - timestamp_ms
+      properties:
+        trace_id:
+          type: string
+          example: "trace-91823"
+        status:
+          type: string
+          example: "OK"
+        version:
+          type: string
+          example: "0.1.0"
+        rustc_version:
+          type: string
+          example: "1.98.0"
+        timestamp_ms:
+          type: integer
+          format: int64
+          example: 1725786000000
+
+    ScanRepositoryRequest:
+      type: object
+      properties:
+        repoPath:
+          type: string
+          example: "/home/daniel/Code/autodoc"
+          description: Path to repository root.
+        deepScan:
+          type: boolean
+          default: false
+          description: When true, parses full AST and call graph edges.
+        enablePiiScrubbing:
+          type: boolean
+          default: true
+          description: When true, scrubs credentials and PII.
+
+    ScanRepositoryResponse:
+      type: object
+      required:
+        - status
+        - repositoryPath
+        - scannedFiles
+        - totalLoc
+        - languages
+        - engine
+        - piiScrubbed
+        - cacheLocation
+      properties:
+        status:
+          type: string
+          example: "SUCCESS"
+        repositoryPath:
+          type: string
+          example: "/home/daniel/Code/autodoc"
+        scannedFiles:
+          type: integer
+          example: 42
+        totalLoc:
+          type: integer
+          example: 4512
+        languages:
+          type: array
+          items:
+            type: string
+          example: ["rs", "ts"]
+        engine:
+          type: string
+          example: "NAPI-RS / Rayon"
+        piiScrubbed:
+          type: boolean
+          example: true
+        cacheLocation:
+          type: string
+          example: ".autodoc/cache.db"
+
+    GetC4DiagramRequest:
+      type: object
+      properties:
+        level:
+          type: integer
+          minimum: 1
+          maximum: 4
+          default: 2
+          example: 2
+        max_nodes:
+          type: integer
+          minimum: 10
+          maximum: 100
+          default: 35
+          example: 35
+        format:
+          type: string
+          enum: [mermaid, structurizr]
+          default: mermaid
+        locale:
+          type: string
+          default: "en-US"
+          example: "en-US"
+        sanitizeOutput:
+          type: boolean
+          default: true
+
+    GetC4DiagramResponse:
+      type: object
+      required:
+        - level
+        - format
+        - diagram
+      properties:
+        level:
+          type: integer
+          example: 2
+        format:
+          type: string
+          example: "mermaid"
+        diagram:
+          type: string
+          example: "flowchart TD\n    Dev[\"Developer\"] --> App[\"AutoDoc\"]"
+
+    SymbolContractResponse:
+      type: object
+      required:
+        - symbol
+        - filePath
+        - deterministicContract
+      properties:
+        symbol:
+          type: string
+          example: "scan_repository"
+        filePath:
+          type: string
+          example: "crates/autodoc-core/src/scanner.rs"
+        deterministicContract:
+          type: object
+          properties:
+            raw:
+              type: string
+              example: "pub fn scan_repository(path: &Path) -> Result<ScanSummary, AutoDocError>"
+            securityBoundary:
+              type: string
+              example: "<untrusted_code_context origin=\"ast_scanner\" path=\"crates/autodoc-core/src/scanner.rs\" symbol=\"scan_repository\">pub fn scan_repository(path: &Path) -> Result<ScanSummary, AutoDocError></untrusted_code_context>"
+
+    TraceDataFlowRequest:
+      type: object
+      required:
+        - sourceEntrypoint
+      properties:
+        sourceEntrypoint:
+          type: string
+          example: "handleScanRepository"
+        targetSink:
+          type: string
+          example: "sqlite_edges"
+        maxDepth:
+          type: integer
+          default: 5
+          example: 5
+
+    TraceDataFlowResponse:
+      type: object
+      required:
+        - source
+        - depth
+        - reachesSink
+        - path
+      properties:
+        source:
+          type: string
+          example: "handleScanRepository"
+        target:
+          type: string
+          example: "sqlite_edges"
+        depth:
+          type: integer
+          example: 3
+        reachesSink:
+          type: boolean
+          example: true
+        path:
+          type: array
+          items:
+            type: object
+            properties:
+              node:
+                type: string
+              kind:
+                type: string
+
+    ApiContractsResponse:
+      type: object
+      required:
+        - protocolsSupported
+        - endpoints
+      properties:
+        protocolsSupported:
+          type: array
+          items:
+            type: string
+          example: ["REST (OpenAPI 3.0)", "gRPC (Protobuf v3)", "SOAP (WSDL 1.1/2.0)"]
+        endpoints:
+          type: array
+          items:
+            type: object
+            properties:
+              protocol:
+                type: string
+                example: "REST"
+              path:
+                type: string
+                example: "/api/v1/scan"
+              method:
+                type: string
+                example: "POST"
+              auth:
+                type: string
+                example: "Bearer"
+
+    GenerateAdrRequest:
+      type: object
+      required:
+        - decision
+      properties:
+        title:
+          type: string
+          example: "Hybrid NAPI-RS Architecture"
+        context:
+          type: string
+          example: "Need ultra-low memory (<100MB) and multi-threaded AST performance."
+        decision:
+          type: string
+          example: "Adopt Rust core via NAPI-RS with TypeScript MCP wrapper."
+        locale:
+          type: string
+          default: "en-US"
+
+    GenerateAdrResponse:
+      type: object
+      required:
+        - adr
+      properties:
+        adr:
+          type: string
+          example: "# ADR-20260908-01: Hybrid NAPI-RS Architecture\n\n## Status: Accepted"
+
+    PurgeCacheResponse:
+      type: object
+      required:
+        - status
+        - vacuumExecuted
+      properties:
+        status:
+          type: string
+          example: "purged"
+        vacuumExecuted:
+          type: boolean
+          example: true
+        database:
+          type: string
+          example: ".autodoc/cache.db"
+        freedBytes:
+          type: integer
+          example: 1048576
+
+    ErrorResponse:
+      type: object
+      required:
+        - code
+        - message
+      properties:
+        code:
+          type: string
+          example: "AUTODOC_E101"
+        message:
+          type: string
+          example: "SQLite database connection failed"
+        details:
+          type: object
+          additionalProperties: true
