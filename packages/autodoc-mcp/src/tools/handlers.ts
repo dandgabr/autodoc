@@ -124,7 +124,19 @@ export class AutoDocTools {
     if (args.format === "structurizr") {
       diagram = DiagramRenderer.renderStructurizrDsl(title, nodes, edges);
     } else {
-      diagram = DiagramRenderer.renderC4ContextMermaid(title, nodes, edges);
+      diagram = DiagramRenderer.renderC4Mermaid({
+        level: args.level,
+        title,
+        nodes: [
+          { id: "CoreApp", label: "Core Application", desc: "Main entrypoint and API controllers", type: "container", technology: "Node.js / TypeScript" },
+          { id: "Database", label: "Database Layer", desc: "SQLite Storage Engine", type: "database", technology: "SQLite WAL" },
+          { id: "WorkerPool", label: "Rayon Worker Pool", desc: "Background AST and data flow parsing", type: "container", technology: "Rust / Rayon" },
+        ],
+        edges: [
+          { from: "CoreApp", to: "Database", label: "queries & writes", technology: "r2d2_sqlite" },
+          { from: "CoreApp", to: "WorkerPool", label: "dispatches work", technology: "NAPI-RS FFI" },
+        ],
+      });
     }
 
     return {

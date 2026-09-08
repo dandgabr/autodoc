@@ -1,15 +1,26 @@
 /**
- * XSS-Free Visual Diagram Generator for Mermaid.js and Structurizr DSL.
- * Strictly adheres to OWASP LLM05: Output Handling.
- * Enforces zero click/href/callback directives and escapes HTML entities.
+ * XSS-Free Visual Diagram Generator for Mermaid.js C4 Model and Structurizr DSL.
+ * Strictly adheres to standard Mermaid C4 syntax (C4Context, C4Container, C4Component)
+ * and OWASP LLM05: Output Handling.
  */
 
 export interface DiagramOptions {
   level: number;
   format?: "mermaid" | "structurizr";
   title?: string;
-  nodes?: Array<{ id: string; label: string; desc?: string; type?: "person" | "system" | "container" | "component" | "external" }>;
-  edges?: Array<{ from: string; to: string; label?: string }>;
+  nodes?: Array<{
+    id: string;
+    label: string;
+    desc?: string;
+    type?: "person" | "system" | "container" | "component" | "external" | "database";
+    technology?: string;
+  }>;
+  edges?: Array<{
+    from: string;
+    to: string;
+    label?: string;
+    technology?: string;
+  }>;
 }
 
 export class DiagramRenderer {
@@ -48,34 +59,96 @@ export class DiagramRenderer {
     return this.renderMermaid(options);
   }
 
-  static renderC4ContextMermaid(
-    title: string,
-    nodes: Array<{ id: string; label: string; type?: string; description?: string }>,
-    edges: Array<{ from: string; to: string; label?: string }>
-  ): string {
-    const lines: string[] = ["flowchart TB"];
-    lines.push(`    %% ${this.escapeMermaidLabel(title)}`);
-    lines.push("    subgraph Boundary_System [\"System Boundary\"]");
+  /**
+   * Generates standard Mermaid.js C4 diagrams according to official Mermaid C4 syntax:
+   * Level 1 -> C4Context
+   * Level 2 -> C4Container
+   * Level 3 -> C4Component
+   */
+  static renderC4Mermaid(options: DiagramOptions): string {
+    const level = options.level || 2;
+    const title = options.title || "System Architecture";
+    const header = level === 1 ? "C4Context" : level === 3 ? "C4Component" : "C4Container";
 
-    for (const n of nodes) {
+    const lines: string[] = [header];
+    lines.push(`    title ${this.escapeMermaidLabel(title)}`);
+    lines.push("");
+
+    const nodes = options.nodes || [];
+    const internalNodes = nodes.filter((n) => n.type !== "external" && n.type !== "person");
+    const externalNodes = nodes.filter((n) => n.type === "external" || n.type === "person");
+
+    // Render external systems and actors outside boundary
+    for (const n of externalNodes) {
       const safeId = this.sanitizeMermaidId(n.id);
-      const safeLabel = this.escapeMermaidLabel(n.label);
-      const safeDesc = n.description ? `<br/>${this.escapeMermaidLabel(n.description)}` : "";
-      lines.push(`        ${safeId}[\"${safeLabel}${safeDesc}\"]`);
-    }
-    lines.push("    end");
-
-    for (const e of edges) {
-      const safeFrom = this.sanitizeMermaidId(e.from);
-      const safeTo = this.sanitizeMermaidId(e.to);
-      if (e.label) {
-        lines.push(`    ${safeFrom} -->|\"${this.escapeMermaidLabel(e.label)}\"| ${safeTo}`);
+      const label = this.escapeMermaidLabel(n.label);
+      const desc = this.escapeMermaidLabel(n.desc || "");
+      if (n.type === "person") {
+        lines.push(`    Person(${safeId}, "${label}", "${desc}")`);
       } else {
-        lines.push(`    ${safeFrom} --> ${safeTo}`);
+        lines.push(`    System_Ext(${safeId}, "${label}", "${desc}")`);
       }
     }
 
+    // Render container/system boundary for internal components
+    if (internalNodes.length > 0) {
+      const boundaryMacro = level === 1 ? "Enterprise_Boundary" : "Container_Boundary";
+      lines.push(`    ${boundaryMacro}(b1, "${this.escapeMermaidLabel(title)}") {`);
+
+      for (const n of internalNodes) {
+        const safeId = this.sanitizeMermaidId(n.id);
+        const label = this.escapeMermaidLabel(n.label);
+        const desc = this.escapeMermaidLabel(n.desc || "");
+        const tech = this.escapeMermaidLabel(n.technology || (n.type === "database" ? "SQLite WAL" : "Core Module"));
+
+        if (level === 1) {
+          lines.push(`        System(${safeId}, "${label}", "${desc}")`);
+        } else if (level === 3) {
+          lines.push(`        Component(${safeId}, "${label}", "${tech}", "${desc}")`);
+        } else {
+          if (n.type === "database") {
+            lines.push(`        ContainerDb(${safeId}, "${label}", "${tech}", "${desc}")`);
+          } else {
+            lines.push(`        Container(${safeId}, "${label}", "${tech}", "${desc}")`);
+          }
+        }
+      }
+
+      lines.push("    }");
+    }
+
+    lines.push("");
+
+    // Render relationships
+    const edges = options.edges || [];
+    for (const e of edges) {
+      const safeFrom = this.sanitizeMermaidId(e.from);
+      const safeTo = this.sanitizeMermaidId(e.to);
+      const label = this.escapeMermaidLabel(e.label || "uses");
+      const tech = e.technology ? `, "${this.escapeMermaidLabel(e.technology)}"` : "";
+      lines.push(`    Rel(${safeFrom}, ${safeTo}, "${label}"${tech})`);
+    }
+
     return lines.join("\n");
+  }
+
+  static renderC4ContextMermaid(
+    title: string,
+    nodes: Array<{ id: string; label: string; type?: string; description?: string; technology?: string }>,
+    edges: Array<{ from: string; to: string; label?: string; technology?: string }>
+  ): string {
+    return this.renderC4Mermaid({
+      level: 1,
+      title,
+      nodes: nodes.map((n) => ({
+        id: n.id,
+        label: n.label,
+        desc: n.description,
+        type: (n.type as any) || "system",
+        technology: n.technology,
+      })),
+      edges,
+    });
   }
 
   static renderStructurizrDsl(
@@ -113,38 +186,12 @@ export class DiagramRenderer {
   }
 
   private static renderMermaid(options: DiagramOptions): string {
-    const lines: string[] = ["graph TD"];
-
-    if (options.title) {
-      lines.push(`    %% Title: ${this.escapeHtml(options.title)}`);
-    }
-
-    const nodes = options.nodes || [];
-    for (const n of nodes) {
-      const safeId = this.sanitizeMermaidId(n.id);
-      const safeLabel = this.escapeHtml(n.label);
-      const safeDesc = n.desc ? `<br/>${this.escapeHtml(n.desc)}` : "";
-      lines.push(`    ${safeId}["${safeLabel}${safeDesc}"]`);
-    }
-
-    const edges = options.edges || [];
-    for (const e of edges) {
-      const safeFrom = this.sanitizeMermaidId(e.from);
-      const safeTo = this.sanitizeMermaidId(e.to);
-      if (e.label) {
-        const safeEdgeLabel = this.escapeHtml(e.label);
-        lines.push(`    ${safeFrom} -->|"${safeEdgeLabel}"| ${safeTo}`);
-      } else {
-        lines.push(`    ${safeFrom} --> ${safeTo}`);
-      }
-    }
-
-    return lines.join("\n");
+    return this.renderC4Mermaid(options);
   }
 
   private static renderStructurizr(options: DiagramOptions): string {
     const title = options.title || "AutoDoc Inspected System";
-    const nodes = (options.nodes || []).map(n => ({ ...n, description: n.desc }));
+    const nodes = (options.nodes || []).map((n) => ({ ...n, description: n.desc }));
     return this.renderStructurizrDsl(title, nodes, options.edges || []);
   }
 }

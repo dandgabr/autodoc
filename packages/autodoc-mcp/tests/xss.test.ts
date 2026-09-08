@@ -45,12 +45,13 @@ describe("DiagramRenderer (XSS & Security Hardening)", () => {
     ];
 
     const mermaid = DiagramRenderer.renderC4ContextMermaid("AutoDoc System", nodes, edges);
-    expect(mermaid).toContain("flowchart TB");
-    expect(mermaid).toContain("subgraph Boundary_System");
+    expect(mermaid).toContain("C4Context");
+    expect(mermaid).toContain("Person(user");
+    expect(mermaid).toContain("System_Ext(github");
     expect(mermaid).not.toContain("<script>");
     expect(mermaid).toContain("&lt;script&gt;");
-    expect(mermaid).toContain("user -->");
-    expect(mermaid).toContain("autodoc -->");
+    expect(mermaid).toContain("Rel(user, autodoc");
+    expect(mermaid).toContain("Rel(autodoc, github");
   });
 
   it("should render valid Structurizr DSL without script injection", () => {

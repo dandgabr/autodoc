@@ -14,36 +14,22 @@
 AutoDoc pairs a high-performance **Rust Core Engine** (`crates/autodoc-core`) with a **TypeScript MCP Server** (`packages/autodoc-mcp`) via Node-API bindings:
 
 ```mermaid
-flowchart TB
-    subgraph Clients ["AI Agent Harnesses"]
-        Claude["Claude Desktop"]
-        Cursor["Cursor IDE"]
-        OpenCode["OpenCode"]
-        Antigravity["Google Antigravity"]
-    end
+C4Container
+    title AutoDoc Code Explorer System Architecture
 
-    subgraph AutoDocServer ["AutoDoc MCP Server (@autodoc/mcp)"]
-        Transport["Stdio Transport (JSON-RPC 2.0)"]
-        Tools["7 MCP Tools (Zod Validation)"]
-        I18n["I18n & Syntax Masking (en-US, pt-BR, es-ES)"]
-        XSS["XSS-Free Diagram Renderer (Mermaid / Structurizr)"]
-    end
+    Person(developer, "Developer / Engineer", "Interacts with coding assistant or CLI.")
+    System_Ext(agent, "AI Agent Harness", "Claude Desktop, Cursor, Antigravity, OpenCode")
 
-    subgraph CoreEngine ["AutoDoc Core Engine (@autodoc/core)"]
-        Bridge["NAPI-RS Bridge (catch_unwind)"]
-        Scanner["Parallel Rayon File Scanner"]
-        Graph["Petgraph & Lasso String Interning"]
-        Defense["PII & Secret Defense (Shannon Entropy >= 4.5)"]
-        Storage["SQLite WAL (Covering Indexes, WITHOUT ROWID)"]
-    end
+    Container_Boundary(b1, "AutoDoc MCP Server") {
+        Container(mcp_server, "@autodoc/mcp Server", "Node.js / TypeScript", "Stdio JSON-RPC 2.0 transport, Zod schemas, i18n and XSS-free C4 diagrams")
+        Container(core_engine, "@autodoc/core Engine", "Rust 2021 / NAPI-RS", "Parallel Rayon file scanner, Petgraph in-memory call graph, Shannon entropy & PII defense")
+        ContainerDb(cache_db, "Local Cache", "SQLite WAL", "High-throughput edge indexing with covering indexes and WITHOUT ROWID")
+    }
 
-    Clients -->|stdio JSON-RPC| Transport
-    Transport --> Tools
-    Tools --> Bridge
-    Bridge --> Scanner
-    Bridge --> Graph
-    Bridge --> Defense
-    Bridge --> Storage
+    Rel(developer, agent, "Prompts architectural queries")
+    Rel(agent, mcp_server, "Dispatches MCP tool calls", "JSON-RPC 2.0 / stdio")
+    Rel(mcp_server, core_engine, "Executes compute-intensive algorithms", "Node-API FFI / catch_unwind")
+    Rel(core_engine, cache_db, "Persists scanned symbols and call graph edges", "r2d2_sqlite / WAL")
 ```
 
 ---

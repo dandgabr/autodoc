@@ -51,7 +51,7 @@ describe("AutoDoc MCP Tools Handlers & Schemas", () => {
     expect(res).toBeDefined();
     expect(res.level).toBe(1);
     expect(res.format).toBe("mermaid");
-    expect(res.diagram).toContain("flowchart TB");
+    expect(res.diagram).toContain("C4Context");
     expect(res.sanitized).toBe(true);
   });
 

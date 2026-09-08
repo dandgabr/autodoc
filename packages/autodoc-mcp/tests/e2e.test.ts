@@ -37,7 +37,8 @@ describe("AutoDoc E2E System Integration Test", () => {
       format: "mermaid",
       sanitizeOutput: true,
     });
-    expect(level1.diagram).toContain("flowchart TB");
+    expect(level1.diagram).toContain("C4Context");
+    expect(level1.diagram).toContain("Rel(CoreApp, Database");
     expect(level1.diagram).not.toContain("<script>");
 
     const level2Dsl = await tools.handleGetC4Diagram({

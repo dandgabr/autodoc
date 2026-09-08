@@ -16,17 +16,17 @@ This document presents the self-mapped architectural topology of the AutoDoc rep
 ---
 
 ## System Context Diagram (C4 Level 1)
-
+ 
 ```mermaid
-flowchart TB
-    %% AutoDoc Self-Mapped System Context
-    subgraph Boundary_System ["AutoDoc System Boundary"]
-        CoreApp["Core Application / MCP Server (@autodoc/mcp)"]
-        Database["SQLite WAL Storage Engine (.autodoc/cache.db)"]
-        WorkerPool["Parallel Rayon Worker Pool (@autodoc/core)"]
-    end
-    CoreApp -->|"queries & updates"| Database
-    CoreApp -->|"dispatches parallel scan"| WorkerPool
+C4Context
+    title AutoDoc Self-Mapped System Context
+
+    Person(developer, "Developer / Engineer", "Interacts with coding assistant or CLI.")
+    System(autodoc, "AutoDoc System", "Code intelligence, architecture mapping, and C4 diagram generation.")
+    System_Ext(agent, "AI Agent Harness", "Claude Desktop, Cursor, Antigravity, OpenCode")
+
+    Rel(developer, agent, "Requests codebase analysis")
+    Rel(agent, autodoc, "Invokes MCP tools over stdio", "JSON-RPC 2.0")
 ```
 
 ---
@@ -34,36 +34,20 @@ flowchart TB
 ## Container Architecture (C4 Level 2)
 
 ```mermaid
-flowchart TB
-    subgraph Clients ["AI Agent Harnesses"]
-        Claude["Claude Desktop"]
-        Cursor["Cursor IDE"]
-        OpenCode["OpenCode Local"]
-        Antigravity["Google Antigravity"]
-    end
+C4Container
+    title AutoDoc Internal Container Architecture
 
-    subgraph AutoDocServer ["AutoDoc MCP Server (@autodoc/mcp)"]
-        Transport["Stdio Transport (JSON-RPC 2.0)"]
-        Tools["7 MCP Tools (Zod Validation)"]
-        I18n["I18n & Syntax Masking"]
-        XSS["XSS-Free Diagram Renderer"]
-    end
+    System_Ext(agent, "AI Agent Harness", "Claude, Cursor, OpenCode, Antigravity")
 
-    subgraph CoreEngine ["AutoDoc Core Engine (@autodoc/core)"]
-        Bridge["NAPI-RS Bridge (catch_unwind)"]
-        Scanner["Parallel Rayon File Scanner"]
-        Graph["Petgraph & Lasso String Interning"]
-        Defense["PII & Secret Defense (Shannon Entropy >= 4.5)"]
-        Storage["SQLite WAL Storage Engine"]
-    end
+    Container_Boundary(b1, "AutoDoc Code Explorer") {
+        Container(mcp_server, "@autodoc/mcp Server", "Node.js / TypeScript", "Handles tool requests, validates schemas, formats C4 diagrams and ADRs")
+        Container(core_engine, "@autodoc/core Engine", "Rust 2021 / Rayon", "Multi-threaded file discovery, Lasso interning, Petgraph pruning")
+        ContainerDb(sqlite_db, "SQLite WAL Storage", "SQLite 3", "Caches AST symbols, edges, and file metadata")
+    }
 
-    Clients -->|stdio JSON-RPC| Transport
-    Transport --> Tools
-    Tools --> Bridge
-    Bridge --> Scanner
-    Bridge --> Graph
-    Bridge --> Defense
-    Bridge --> Storage
+    Rel(agent, mcp_server, "Dispatches tool calls", "stdio")
+    Rel(mcp_server, core_engine, "Calls native bindings", "Node-API FFI")
+    Rel(core_engine, sqlite_db, "Stores and retrieves index", "r2d2_sqlite / WAL")
 ```
 
 ---
