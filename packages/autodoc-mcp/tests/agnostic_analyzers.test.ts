@@ -105,6 +105,9 @@ describe("Agnostic Discovery Engines (Workspace, Containers, REST, Realtime, Sch
     // Verify discriminators
     const discriminators = models.filter((m) => m.isDiscriminator || m.collectionOrTable.includes("matches"));
     expect(discriminators.length).toBeGreaterThan(0);
+    const withDiscKey = discriminators.filter((m) => m.discriminatorKey);
+    expect(withDiscKey.length).toBeGreaterThan(0);
+    expect(withDiscKey[0].discriminatorKey).toBe("moduleId");
 
     // Verify soft-delete and timestamps
     const withTimestamps = models.filter((m) => m.hasTimestamps);
@@ -137,6 +140,10 @@ describe("Agnostic Discovery Engines (Workspace, Containers, REST, Realtime, Sch
     expect(level2.nodes.some((n) => n.id === "SharedKernel")).toBe(true);
     expect(level2.nodes.some((n) => n.id === "PrimaryDb")).toBe(true);
     expect(level2.nodes.some((n) => n.id === "CacheCluster")).toBe(true);
+
+    const level3 = analyzer.getArchitectureGraph(3);
+    expect(level3.nodes.length).toBeGreaterThan(0);
+    expect(level3.nodes.some((n) => n.id.startsWith("model_base_") || n.id.startsWith("disc_"))).toBe(true);
   });
 
   it("should synthesize complete Diataxis living documentation structure", () => {

@@ -109,7 +109,12 @@ export class DiataxisGenerator {
         honesty.deadDeclaredEvents.length === 0
           ? "_No dead socket events detected in declared interfaces._"
           : honesty.deadDeclaredEvents
-              .map((d: DeadCodeItem) => `- **\`${d.name}\`** (\`${d.sourceFile}\`): ${d.reason}`)
+              .map(
+                (d: DeadCodeItem) =>
+                  `- **\`${d.name}\`** (\`${d.sourceFile}\`)${
+                    d.confidence ? ` [Confidence: **${d.confidence.toUpperCase()}**]` : ""
+                  }: ${d.reason}`
+              )
               .join("\n"),
         "",
         "## 2. Undeclared Socket Events",
@@ -198,7 +203,11 @@ export class DiataxisGenerator {
         m.parentModel ? `- **Containing Parent Model**: \`${m.parentModel}\`` : "",
         `- **Soft Delete**: ${m.hasSoftDelete ? "Enabled" : "Disabled"}`,
         `- **Timestamps**: ${m.hasTimestamps ? "Enabled" : "Disabled"}`,
-        m.isDiscriminator ? `- **Polymorphic Discriminator**: Base \`${m.baseModel || "Parent"}\`` : "",
+        m.isDiscriminator
+          ? `- **Polymorphic Discriminator**: Base \`${m.baseModel || "Parent"}\`${
+              m.discriminatorKey ? ` (Discriminator Key: \`${m.discriminatorKey}\`)` : ""
+            }`
+          : "",
         indexSummary,
         `- **Source**: \`${m.sourceFile}\``,
         "",

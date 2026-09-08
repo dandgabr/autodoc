@@ -9,6 +9,7 @@ export interface DeadCodeItem {
   type: "DEAD_DECLARED_EVENT" | "UNDECLARED_EVENT" | "ORPHAN_SYMBOL" | "ORPHAN_ROUTE";
   sourceFile: string;
   reason: string;
+  confidence?: "high" | "medium" | "low";
 }
 
 export interface HonestyReport {
@@ -49,11 +50,31 @@ export class HonestyAnalyzer {
     // Events declared in interfaces but never called imperatively
     for (const typed of typedEvents) {
       if (!imperativeNames.has(typed.eventName) && typed.eventName !== "connection") {
+        // Evaluate heuristic confidence:
+        // - low: dynamic prefix (e.g. room:*, event:*, sfu:*, rtc:*, screenshare:*) or generic keywords
+        // - medium: game/submodule prefix (e.g. bombeta:*, roulette:*) where handlers might be registered via dynamic dispatch
+        // - high: specific static single-word or fully isolated event name
+        let confidence: "high" | "medium" | "low" = "high";
+        if (
+          typed.eventName.startsWith("room:") ||
+          typed.eventName.startsWith("rtc:") ||
+          typed.eventName.startsWith("sfu:") ||
+          typed.eventName.startsWith("webrtc:") ||
+          typed.eventName.startsWith("screenshare:") ||
+          typed.eventName.startsWith("presence:") ||
+          typed.eventName.startsWith("notification:")
+        ) {
+          confidence = "low";
+        } else if (typed.eventName.includes(":")) {
+          confidence = "medium";
+        }
+
         deadDeclaredEvents.push({
           name: typed.eventName,
           type: "DEAD_DECLARED_EVENT",
           sourceFile: typed.sourceFile,
-          reason: `Declared in TypeScript socket interface (${typed.direction}) but no active emit or handler found in codebase.`,
+          confidence,
+          reason: `Declared in TypeScript socket interface (${typed.direction}) but no active emit or handler found in codebase. [Confidence: ${confidence.toUpperCase()}]`,
         });
       }
     }

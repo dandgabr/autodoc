@@ -3,6 +3,7 @@ import { join, basename } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { WorkspaceAnalyzer, WorkspaceInfo } from "./workspace.js";
 import { ContainerInfraAnalyzer, ContainerInfraReport } from "./containers.js";
+import { SchemaAnalyzer } from "./schema/index.js";
 import { isTestPath } from "./utils.js";
 
 export interface ArchitectureNode {
@@ -549,6 +550,56 @@ export class ArchitectureAnalyzer {
         { from: "GameEnginesComp", to: "WalletAuthComp", label: "transacts bet payouts", technology: "Internal Call" },
         { from: "RoomManagerComp", to: "MediaSfuComp", label: "binds SFU tracks to room", technology: "Internal Call" }
       );
+    }
+
+    // Connect and represent Polymorphic Data Models & Discriminators
+    try {
+      const schemaAnalyzer = new SchemaAnalyzer(this.repoPath);
+      const allModels = schemaAnalyzer.discoverModels(100, false);
+      const discriminators = allModels.filter((m) => m.isDiscriminator);
+      const rootModels = allModels.filter((m) => !m.isDiscriminator && !m.isSubdocument);
+
+      // Add Base Polymorphic models (e.g., Match)
+      const baseModelsSeen = new Set<string>();
+      for (const disc of discriminators) {
+        const baseName = disc.baseModel || "Match";
+        if (!baseModelsSeen.has(baseName)) {
+          baseModelsSeen.add(baseName);
+          const baseId = `model_base_${baseName.toLowerCase()}`;
+          if (!nodes.some((n) => n.id === baseId)) {
+            nodes.push({
+              id: baseId,
+              label: `${baseName} (Base Model)`,
+              desc: `Root polymorphic model with discriminatorKey '${disc.discriminatorKey || "moduleId"}'`,
+              type: "database",
+              technology: `${disc.framework} Schema`,
+            });
+          }
+        }
+
+        // Add discriminator variant node if space allows
+        if (nodes.length < maxNodes + 10) {
+          const discId = `disc_${disc.modelName.replace(/[^a-zA-Z0-9_]/g, "_")}`;
+          if (!nodes.some((n) => n.id === discId)) {
+            nodes.push({
+              id: discId,
+              label: disc.modelName,
+              desc: `Discriminator variant on ${disc.baseModel || "Match"} (${disc.collectionOrTable})`,
+              type: "component",
+              technology: `${disc.framework} Discriminator`,
+            });
+            const baseId = `model_base_${(disc.baseModel || "Match").toLowerCase()}`;
+            edges.push({
+              from: discId,
+              to: baseId,
+              label: `discriminates (${disc.discriminatorKey || "moduleId"})`,
+              technology: "ODM Inheritance",
+            });
+          }
+        }
+      }
+    } catch {
+      // Best-effort schema enrichment
     }
 
     return {

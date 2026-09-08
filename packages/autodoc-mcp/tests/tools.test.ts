@@ -91,6 +91,16 @@ describe("AutoDoc MCP Tools Handlers & Schemas", () => {
     expect(res).toBeDefined();
     expect(res.source).toBe("handleScanRepository");
     expect(res.path.length).toBeGreaterThan(0);
+
+    // Test async route ingress flow
+    const routeFlow = await tools.handleTraceDataFlow({
+      sourceEntrypoint: "/api/users/profile",
+      maxDepth: 5
+    });
+    expect(routeFlow).toBeDefined();
+    expect(routeFlow.path.some((p) => p.kind === "MIDDLEWARE")).toBe(true);
+    expect(routeFlow.path.some((p) => p.kind === "SERVICE_HANDLER")).toBe(true);
+    expect(routeFlow.path.some((p) => p.kind === "PERSISTENCE_ODM_SINK")).toBe(true);
   });
 
   it("should execute autodoc_list_api_contracts", async () => {

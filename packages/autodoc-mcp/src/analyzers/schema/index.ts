@@ -116,7 +116,11 @@ export class SchemaAnalyzer {
         if (model.compoundIndexes && model.compoundIndexes.length > 0) {
           existing.compoundIndexes = [...(existing.compoundIndexes || []), ...model.compoundIndexes];
         }
-        if (model.isDiscriminator) existing.isDiscriminator = true;
+        if (model.isDiscriminator) {
+          existing.isDiscriminator = true;
+          if (model.baseModel) existing.baseModel = model.baseModel;
+          if (model.discriminatorKey) existing.discriminatorKey = model.discriminatorKey;
+        }
         if (model.hasSoftDelete) existing.hasSoftDelete = true;
         if (model.hasTimestamps) existing.hasTimestamps = true;
         if (model.isSubdocument === false) {
@@ -206,20 +210,23 @@ export class SchemaAnalyzer {
     }
 
     // 2. Mongoose Discriminators: Base.discriminator('VariantName', schema)
-    const discRegex = /\.discriminator(?:<[^>]+>)?\s*\(\s*['"`]([^'"`]+)['"`]/g;
+    const discRegex = /([a-zA-Z0-9_]+)\.discriminator(?:<[^>]+>)?\s*\(\s*['"`]([^'"`]+)['"`]/g;
     let discMatch;
     while ((discMatch = discRegex.exec(content)) !== null) {
-      const discName = discMatch[1];
+      const baseVar = discMatch[1];
+      const discName = discMatch[2];
+      const baseModel = baseVar ? baseVar.replace(/Model$/i, "") : "Match";
       out.set(discName, {
         modelName: discName,
-        collectionOrTable: "matches (discriminator)",
+        collectionOrTable: `${baseModel.toLowerCase()}s (discriminator)`,
         fields: [],
         sourceFile: relPath,
         framework: "Mongoose",
         hasSoftDelete: true,
         hasTimestamps: true,
         isDiscriminator: true,
-        baseModel: "Match",
+        baseModel,
+        discriminatorKey: "moduleId",
         isSubdocument: false,
       });
     }
@@ -233,7 +240,7 @@ export class SchemaAnalyzer {
         const discName = `Match:${id}`;
         out.set(discName, {
           modelName: discName,
-          collectionOrTable: "matches",
+          collectionOrTable: "matches (discriminator)",
           fields: [],
           sourceFile: relPath,
           framework: "Mongoose",
@@ -241,6 +248,7 @@ export class SchemaAnalyzer {
           hasTimestamps: true,
           isDiscriminator: true,
           baseModel: "Match",
+          discriminatorKey: "moduleId",
           isSubdocument: false,
         });
       }
@@ -345,7 +353,7 @@ export class SchemaAnalyzer {
       if (!out.has(discName)) {
         out.set(discName, {
           modelName: discName,
-          collectionOrTable: "matches",
+          collectionOrTable: "matches (discriminator)",
           fields: [],
           sourceFile: relPath,
           framework: "Mongoose",
@@ -353,6 +361,8 @@ export class SchemaAnalyzer {
           hasTimestamps: true,
           isDiscriminator: true,
           baseModel: "Match",
+          discriminatorKey: "moduleId",
+          isSubdocument: false,
         });
       }
     }
