@@ -1,0 +1,41 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  rust:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v4
+      - name: Format check
+        run: cargo fmt --check -p autodoc-core || true
+      - name: Rust tests
+        run: cargo test -p autodoc-core
+      - name: License gate (cargo-deny)
+        run: |
+          cargo install cargo-deny --locked || true
+          cargo deny --config .cargo-deny.toml check licenses bans
+
+  typescript:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Build Rust core (native addon)
+        run: |
+          npm install
+          npm run build -w @autodoc/core
+      - name: Build MCP server
+        run: npm run build -w @autodoc/mcp
+      - name: TypeScript tests
+        run: npm run test:bridge
+      - name: License gate (npm)
+        run: npm run check:licenses

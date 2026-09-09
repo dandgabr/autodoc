@@ -164,7 +164,7 @@ flowchart TD
 
     subgraph TSModels["📦 TypeScript Model Layer (@autodoc/mcp)"]
         direction TB
-        AutoDocTools["class AutoDocTools<br/><small>• handleScanRepository()<br/>• handleGetC4Diagram()<br/>• handleGetSymbolContract()<br/>• handleTraceDataFlow()<br/>• handleListApiContracts()<br/>• handleListSocketContracts()<br/>• handleExportDocumentation()<br/>• handleGenerateAdr()<br/>• handlePurgeCache()</small>"]:::tsClass
+        AutoDocTools["class AutoDocTools<br/><small>• handleScanRepository()<br/>• handleGetC4Diagram()<br/>• handleGetSymbolContract()<br/>• handleTraceDataFlow()<br/>• handleListApiContracts()<br/>• handleListSocketContracts()<br/>• handleExportDocumentation()<br/>• handleExportOpenApi()<br/>• handleGenerateAdr()<br/>• handleLlmStatus()<br/>• handlePurgeCache()</small>"]:::tsClass
         Analyzers["Analyzers & Synthesis<br/><small>• ArchitectureAnalyzer<br/>• RestAnalyzer<br/>• RealtimeAnalyzer<br/>• SchemaAnalyzer<br/>• HonestyAnalyzer<br/>• DiataxisGenerator</small>"]:::tsClass
         DiagramRenderer["class DiagramRenderer<br/><small>• escapeHtml()<br/>• sanitizeMermaidId()<br/>• renderC4Mermaid()<br/>• renderStructurizrDsl()</small>"]:::tsClass
     end

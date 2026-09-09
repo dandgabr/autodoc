@@ -101,7 +101,7 @@ function autoResolve(caps: HostCapabilities): ResolvedModel | { error: string } 
   return {
     error:
       "AUTODOC_LLM_E404: no local GGUF weights found for any profile and none fits the host budget. " +
-      "Provide AUTODOC_LLM_MODEL=<path-to-gguf> or download a model (see docs/llm.md). " +
+      "Provide AUTODOC_LLM_MODEL=<path-to-gguf> or run scripts/setup-llm.sh (see docs/how-to/local-llm-enrichment.md). " +
       "Falling back to deterministic (regex-only) behavior.",
   };
 }

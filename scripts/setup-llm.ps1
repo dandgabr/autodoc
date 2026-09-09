@@ -79,6 +79,21 @@ if (Test-Path $ModelTarget) {
   }
 }
 
+# Integrity check: verify SHA-256 against HuggingFace LFS metadata (x-linked-etag).
+$HeadResponse = Invoke-WebRequest -Uri "https://huggingface.co/$($Spec.repo)/raw/main/$($Spec.file)" -Method Head -UseBasicParsing
+$ExpectedSha = ($HeadResponse.Headers["x-linked-etag"] | Select-Object -First 1) -replace '"', ""
+if ($ExpectedSha -match '^[a-f0-9]{64}$') {
+  $LocalSha = (Get-FileHash -Path $ModelTarget -Algorithm SHA256).Hash.ToLower()
+  if ($LocalSha -eq $ExpectedSha.ToLower()) {
+    Write-Ok "Model SHA-256 verified: $($LocalSha.Substring(0, 16))..."
+  } else {
+    Write-Error "SHA-256 MISMATCH for $($Spec.file) (expected $($ExpectedSha.Substring(0,16))..., got $($LocalSha.Substring(0,16))...). Delete the file and re-run."
+    exit 1
+  }
+} else {
+  Write-Warn2 "Could not fetch upstream SHA-256 — verify manually before production use."
+}
+
 # ---------- 4. node-llama-cpp install & build ----------
 Write-Step "Installing node-llama-cpp..."
 npm install node-llama-cpp --workspace "@autodoc/mcp" 2>$null | Out-Null

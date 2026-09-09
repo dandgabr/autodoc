@@ -120,7 +120,7 @@ Discovers Socket.io events, WebSocket listeners/emitters, typed payload interfac
 | Name | Type | Required | Default | Description |
 | :--- | :--- | :--- | :--- | :--- |
 | `directionFilter` | string | No | `"ALL"` | Event direction: `"ALL"`, `"CLIENT_TO_SERVER"`, `"SERVER_TO_CLIENT"`, or `"BIDIRECTIONAL"`. |
-| `limit` | integer | No | `50` | Pagination limit (1-200). |
+| `limit` | integer | No | `50` | Pagination limit (1-100). |
 | `cursor` | string | No | - | Cursor for paginated traversal. |
 
 ### Response Schema
@@ -152,7 +152,7 @@ Synthesizes living technical documentation structured according to the Diátaxis
 | Name | Type | Required | Default | Description |
 | :--- | :--- | :--- | :--- | :--- |
 | `outputDir` | string | No | `"./docs"` | Directory path where Diátaxis markdown files will be written. |
-| `includeSourceRef` | boolean | No | `true` | Include source code references and line numbers in markdown files. |
+| `include_tests` | boolean | No | `false` | Include test suites and mock files in discovery. |
 
 ### Response Schema
 ```json

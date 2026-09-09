@@ -15,9 +15,11 @@
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$REPO_ROOT"
 MODELS_DIR="${REPO_ROOT}/.autodoc/models"
 PROFILE="small"
 BACKEND="auto"
+GCC_MAJOR=0
 MODEL_REPO="Qwen/Qwen2.5-Coder-3B-Instruct-GGUF"
 MODEL_FILE="qwen2.5-coder-3b-instruct-q4_k_m.gguf"
 
@@ -192,7 +194,7 @@ prepare_spirv_headers() {
   ok "SPIRV-Headers vendored at $spirv_dir/prefix"
 }
 
-# ---------- 4. Model download ----------
+# ---------- 4. Model download (integrity-checked) ----------
 mkdir -p "$MODELS_DIR"
 if [[ -f "$MODELS_DIR/$MODEL_FILE" ]]; then
   ok "Model already downloaded: $MODEL_FILE"
@@ -212,8 +214,38 @@ else
       exit 1
     fi
   fi
-  ok "Model ready: $MODELS_DIR/$MODEL_FILE"
+  ok "Model downloaded: $MODELS_DIR/$MODEL_FILE"
 fi
+
+# Integrity check: verify SHA-256 against the official HuggingFace metadata
+# (LFS pointer oid). Guards against corrupted or tampered weights — the model
+# runs in-process, so integrity is a supply-chain requirement.
+verify_model_sha256() {
+  local file="$MODELS_DIR/$MODEL_FILE"
+  [[ -f "$file" ]] || { err "Model file missing: $file"; return 1; }
+  local local_sha expected_sha
+  if command -v sha256sum >/dev/null 2>&1; then
+    local_sha=$(sha256sum "$file" | awk '{print $1}')
+  else
+    local_sha=$(shasum -a 256 "$file" | awk '{print $1}')
+  fi
+  expected_sha=$(curl -sIL "$local_url" 2>/dev/null | grep -iE "^x-linked-etag:" | grep -oE '"[a-f0-9]{64}"' | tr -d '"' | head -1)
+  if [[ -z "$expected_sha" ]]; then
+    # Fallback: HuggingFace LFS API returns the sha256 in the etag header of the HEAD response.
+    expected_sha=$(curl -sI "https://huggingface.co/${MODEL_REPO}/raw/main/${MODEL_FILE}" 2>/dev/null | grep -iE "^x-linked-etag:" | grep -oE '[a-f0-9]{64}' | head -1)
+  fi
+  if [[ -z "$expected_sha" ]]; then
+    warn "Could not fetch upstream SHA-256 for $MODEL_FILE — verify manually before production use."
+    return 0
+  fi
+  if [[ "$local_sha" == "$expected_sha" ]]; then
+    ok "Model SHA-256 verified: ${local_sha:0:16}..."
+  else
+    err "SHA-256 MISMATCH for $MODEL_FILE (expected ${expected_sha:0:16}..., got ${local_sha:0:16}...). Delete the file and re-run."
+    exit 1
+  fi
+}
+verify_model_sha256
 
 # ---------- 5. node-llama-cpp install & backend build ----------
 if [[ "${AUTODOC_LLM_SKIP_BUILD:-0}" == "1" ]]; then

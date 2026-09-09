@@ -36,12 +36,12 @@ export class RestAnalyzer {
 
   /**
    * Pass-2 LLM validation of ambiguous candidates. Prunes rejected
-   * endpoints from the last discovery result. Safe no-op without staged
-   * candidates.
+   * endpoints from the last discovery result and returns the pruned list
+   * (no re-scan required). Safe no-op without staged candidates.
    */
-  public async applyLlmValidation(): Promise<EnrichmentReport> {
+  public async applyLlmValidation(): Promise<EnrichmentReport & { endpoints: DiscoveredEndpoint[] }> {
     if (!this.llmEnrichment || this.pendingLlmCandidates.length === 0) {
-      return this.lastEnrichmentReport;
+      return { ...this.lastEnrichmentReport, endpoints: this.lastEndpoints };
     }
     const filter = new LlmCandidateFilter(true);
     const { verdicts, report } = await filter.validateCandidates(this.pendingLlmCandidates);
@@ -50,9 +50,24 @@ export class RestAnalyzer {
     verdicts.forEach((v, i) => {
       if (!v.accepted) rejected.add(this.pendingLlmCandidates[i].index);
     });
+
+    // Trust guard: the LLM sees untrusted repository code and can be steered
+    // by prompt injection to suppress genuine endpoints. If it rejects more
+    // than 30% of candidates, keep pass-1 results untouched (advisory mode).
+    const rejectionRatio = verdicts.length > 0 ? rejected.size / verdicts.length : 0;
+    if (rejectionRatio > 0.3) {
+      this.pendingLlmCandidates = [];
+      return {
+        ...report,
+        candidatesRejected: 0,
+        advisory: `LLM rejected ${(rejectionRatio * 100).toFixed(0)}% of candidates (>30% cap) — pass-1 results kept.`,
+        endpoints: this.lastEndpoints,
+      };
+    }
+
     this.lastEndpoints = this.lastEndpoints.filter((_, i) => !rejected.has(i));
     this.pendingLlmCandidates = [];
-    return report;
+    return { ...report, endpoints: this.lastEndpoints };
   }
 
   constructor(repoPath: string = process.cwd(), options: RestAnalyzerOptions = {}) {

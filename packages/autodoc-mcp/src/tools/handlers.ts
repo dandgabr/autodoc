@@ -1,5 +1,6 @@
 import { z } from "zod";
-import { join } from "node:path";
+import { join, resolve, sep } from "node:path";
+import os from "node:os";
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { DatabaseSync } from "node:sqlite";
 import { DiagramRenderer } from "../diagrams/renderer.js";
@@ -12,7 +13,7 @@ import { RestAnalyzer } from "../analyzers/rest/index.js";
 import { OpenApiGenerator } from "../analyzers/rest/openapi.js";
 import { RealtimeAnalyzer } from "../analyzers/realtime/index.js";
 import { DiataxisGenerator } from "../diataxis/generator.js";
-import { getLlmEnrichment } from "../llm/enrichment.js";
+import { getLlmEnrichment, sanitizeForPrompt } from "../llm/enrichment.js";
 import { generateJson } from "../llm/structured.js";
 import { detectHostCapabilities } from "../llm/hardware.js";
 import { previewAutoProfile } from "../llm/enrichment.js";
@@ -251,7 +252,10 @@ export class AutoDocTools {
 
     const analyzer = new ArchitectureAnalyzer(this.resolveTargetRepo(args));
     const graph = analyzer.getArchitectureGraph(args.level, args.max_nodes);
-    const evidence = graph.nodes.map((n: any) => `${n.id}: ${n.label || n.name} (${n.type || "component"})`).join("\n");
+    const evidence = sanitizeForPrompt(
+      graph.nodes.map((n: any) => `${n.id}: ${n.label || n.name} (${n.type || "component"})`).join("\n"),
+      "c4_evidence"
+    );
 
     const RefineSchema = _z.object({
       // Models sometimes wrap the list in an object; normalize below.
@@ -535,6 +539,27 @@ export class AutoDocTools {
     };
   }
 
+  /**
+   * Ensures a user-supplied output directory is contained within the target
+   * repository or the OS temp directory. Blocks absolute paths elsewhere and
+   * `..` traversal — MCP agents can be steered by prompt injection from the
+   * scanned code.
+   */
+  private containOutputPath(targetRepo: string, userPath: string): string {
+    const resolvedRepo = resolve(targetRepo);
+    const resolvedOut = resolve(targetRepo, userPath);
+    const inRepo = resolvedOut === resolvedRepo || resolvedOut.startsWith(resolvedRepo + sep);
+    // Tests and throwaway pipelines legitimately export to the OS temp dir.
+    const inTemp = resolvedOut.startsWith(os.tmpdir() + sep);
+    if (!inRepo && !inTemp) {
+      throw new AutoDocException(
+        "AUTODOC_E501",
+        `Output path escapes the target repository: '${userPath}'. Use a path inside ${resolvedRepo} or the OS temp directory.`
+      );
+    }
+    return resolvedOut;
+  }
+
   async handleListApiContracts(args: z.infer<typeof ListApiContractsSchema>) {
     const targetRepo = this.resolveTargetRepo(args);
     const includeTests = args.include_tests ?? args.includeTests ?? false;
@@ -544,14 +569,15 @@ export class AutoDocTools {
     let contracts = analyzer.discoverEndpoints(filter, args.limit);
     let enrichment: Record<string, unknown> | undefined;
     if (llmEnrich && analyzer.pendingLlmCandidates.length > 0) {
-      const report = await analyzer.applyLlmValidation();
-      // Pass-2 may have pruned rejected candidates from the endpoint list.
-      contracts = analyzer.discoverEndpoints(filter, args.limit);
+      const validation = await analyzer.applyLlmValidation();
+      // Pass-2 returns the pruned list directly — no re-scan (which would
+      // reset the analyzer state and resurrect rejected candidates).
+      contracts = validation.endpoints;
       enrichment = {
-        llmEnriched: report.llmEnriched,
-        ...(report.model ? { model: report.model } : {}),
-        candidatesReviewed: report.candidatesReviewed,
-        candidatesRejected: report.candidatesRejected,
+        llmEnriched: validation.llmEnriched,
+        ...(validation.model ? { model: validation.model } : {}),
+        candidatesReviewed: validation.candidatesReviewed,
+        candidatesRejected: validation.candidatesRejected,
       };
     }
 
@@ -601,8 +627,9 @@ export class AutoDocTools {
     result.document = document;
 
     if (outputDir) {
-      mkdirSync(outputDir, { recursive: true });
-      const target = join(outputDir, "openapi.json");
+      const contained = this.containOutputPath(targetRepo, outputDir);
+      mkdirSync(contained, { recursive: true });
+      const target = join(contained, "openapi.json");
       writeFileSync(target, JSON.stringify(result.document, null, 2), "utf-8");
       return {
         status: "SUCCESS",
@@ -626,7 +653,7 @@ export class AutoDocTools {
 
   async handleExportDocumentation(args: z.infer<typeof ExportDocumentationSchema>) {
     const targetRepo = this.resolveTargetRepo(args);
-    const targetDir = args.output_dir || args.outputDir || join(targetRepo, "docs");
+    const targetDir = this.containOutputPath(targetRepo, args.output_dir || args.outputDir || "docs");
     const includeTests = args.include_tests ?? args.includeTests ?? false;
     const generator = new DiataxisGenerator(targetRepo, { includeTests });
     const result = generator.exportToDirectory(targetDir);
@@ -705,7 +732,7 @@ export class AutoDocTools {
       availableProfiles,
       note: enrichment
         ? "LLM enrichment active. Pass model_profile (small|mid|large|auto) to any enriched tool to override."
-        : "No local model available. Deterministic (regex-only) behavior active. Set AUTODOC_LLM_MODEL=<gguf path> or download a model to docs/llm.md instructions.",
+        : "No local model available. Deterministic (regex-only) behavior active. Set AUTODOC_LLM_MODEL=<gguf path> or run scripts/setup-llm.sh (see docs/how-to/local-llm-enrichment.md).",
     };
   }
 

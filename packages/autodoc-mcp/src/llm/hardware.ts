@@ -51,30 +51,31 @@ export async function detectHostCapabilities(): Promise<HostCapabilities> {
   // (e.g. NVIDIA CUDA + Vulkan, Intel iGPU via OpenCL/Level Zero). The
   // factory picks the highest-priority backend the runtime can actually use.
 
-  // 1. NVIDIA CUDA (nvidia-smi)
-  const nvidia = await probeVram("nvidia-smi", [
-    "--query-gpu=memory.total,memory.free",
-    "--format=csv,noheader,nounits",
+  // Probe ALL GPU sources in parallel — they are independent CLI calls with
+  // per-probe timeouts; sequential awaiting would cost ~17s on GPU-less hosts.
+  const [nvidia, rocm, syclGpu, vulkanGpus, metal] = await Promise.all([
+    probeVram("nvidia-smi", ["--query-gpu=memory.total,memory.free", "--format=csv,noheader,nounits"]),
+    probeVram("rocm-smi", ["--showmeminfo", "vram", "--csv"]),
+    probeSyclGpu(),
+    probeVulkanGpus(),
+    probeVram("powermetrics", ["--samplers", "smc", "-n", "1"]),
   ]);
+
   if (nvidia) {
     [totalVramBytes, freeVramBytes] = nvidia;
     detectedVia.push("nvidia-smi");
     gpuBackends.push({ priority: 1, device: "cuda" });
   }
 
-  // 2. AMD ROCm (rocm-smi)
-  const rocm = await probeVram("rocm-smi", ["--showmeminfo", "vram", "--csv"]);
-  if (rocm && (freeVramBytes === undefined || rocm[1] < freeVramBytes)) {
-    // Keep the tightest VRAM budget across GPUs for model sizing.
-    [totalVramBytes, freeVramBytes] = rocm;
-    detectedVia.push("rocm-smi");
-  }
   if (rocm) {
+    if (freeVramBytes === undefined || rocm[1] < freeVramBytes) {
+      // Keep the tightest VRAM budget across GPUs for model sizing.
+      [totalVramBytes, freeVramBytes] = rocm;
+    }
+    detectedVia.push("rocm-smi");
     gpuBackends.push({ priority: 2, device: "rocm" });
   }
 
-  // 3. Intel oneAPI SYCL (sycl-ls with GPU devices)
-  const syclGpu = await probeSyclGpu();
   if (syclGpu) {
     detectedVia.push("sycl-ls");
     gpuBackends.push({ priority: 3, device: "sycl" });
@@ -85,8 +86,6 @@ export async function detectHostCapabilities(): Promise<HostCapabilities> {
     }
   }
 
-  // 4. Vulkan (vulkaninfo) — universal fallback for any vendor
-  const vulkanGpus = await probeVulkanGpus();
   if (vulkanGpus.length > 0) {
     detectedVia.push(`vulkaninfo(${vulkanGpus.slice(0, 2).join(", ")})`);
     gpuBackends.push({ priority: 4, device: "vulkan" });
@@ -96,8 +95,6 @@ export async function detectHostCapabilities(): Promise<HostCapabilities> {
     }
   }
 
-  // 5. Apple Metal (powermetrics, macOS)
-  const metal = await probeVram("powermetrics", ["--samplers", "smc", "-n", "1"]);
   if (metal !== undefined) {
     detectedVia.push("powermetrics");
     gpuBackends.push({ priority: 3, device: "metal" });
@@ -159,14 +156,20 @@ async function probeVram(cmd: string, args: string[]): Promise<[number, number] 
 }
 
 function parseVramOutput(cmd: string, stdout: string): [number, number] | undefined {
+  // Numbers on a comma-separated line (nvidia-smi CSV format).
   const megabytes = stdout
     .split("\n")
     .map((l) => l.trim())
     .filter((l) => /,/.test(l))
     .flatMap((l) => l.split(",").map((v) => parseInt(v.trim(), 10)))
     .filter((n) => Number.isFinite(n) && n > 0);
-  if (cmd === "nvidia-smi" && megabytes.length >= 2) {
+  if (megabytes.length >= 2) {
     return [megabytes[0] * 1024 ** 2, megabytes[1] * 1024 ** 2];
+  }
+  // rocm-smi --csv format: "gpu,used_vram,total_vram" lines in KiB.
+  const rocmMatch = /vram.*?(\d+).*?(\d+)/i.exec(stdout.replace(/\s/g, " "));
+  if (cmd === "rocm-smi" && rocmMatch) {
+    return [parseInt(rocmMatch[2], 10) * 1024, parseInt(rocmMatch[1], 10) * 1024];
   }
   return undefined;
 }

@@ -49,8 +49,15 @@ export async function createLlmProvider(
 async function createNodeLlamaProvider(resolved: ResolvedModel, config: LlmConfig): Promise<LlmProvider | null> {
   if (!resolved.weightsPath) return null;
   try {
-    // Optional peer dependency: loaded lazily, never a hard requirement.
-    const mod = (await (new Function("m", "return import(m)")("node-llama-cpp").catch(() => null))) as any;
+    // Optional peer dependency: loaded lazily via a dynamic import so the
+    // module is never required at startup (the catch handles absence — it is
+    // an expected condition, not an error).
+    let mod: any = null;
+    try {
+      mod = await import("node-llama-cpp");
+    } catch {
+      return null;
+    }
     if (!mod) return null;
     const { getLlama, LlamaChatSession } = mod;
 
@@ -91,7 +98,8 @@ async function createNodeLlamaProvider(resolved: ResolvedModel, config: LlmConfi
           systemPrompt: system,
           maxTokens: options?.maxTokens ?? 1024,
           temperature: options?.temperature ?? 0,
-          signal: options?.signal,
+          // Pathological prompts must not wedge the cached singleton session.
+          signal: options?.signal ?? AbortSignal.timeout(LLM_TIMEOUT_MS),
         });
         return String(response);
       },

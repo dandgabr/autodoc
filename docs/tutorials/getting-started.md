@@ -80,7 +80,7 @@ cargo test -p autodoc-core
 npm test -w @autodoc/mcp
 ```
 
-All Rust tests and 42 TypeScript tests should pass cleanly.
+All Rust tests and 50 TypeScript tests should pass cleanly.
 
 ---
 

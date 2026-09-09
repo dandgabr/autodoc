@@ -307,9 +307,8 @@ export function extractResponses(
   // Python / Go / Rust return of typed models
   const typedReturnRegex = /return\s+(?:[A-Za-z_.]+\s*\(\s*)?([A-Z][A-Za-z0-9_]+)(?:\s*\(|\s*\{)/g;
   while ((m = typedReturnRegex.exec(handlerBody)) !== null) {
-    const code = responses.has("200") ? "200" : "200";
-    if (!responses.has(code)) {
-      responses.set(code, { statusCode: code, description: describeStatus(code), ref: m[1] });
+    if (!responses.has("200")) {
+      responses.set("200", { statusCode: "200", description: describeStatus("200"), ref: m[1] });
     }
   }
 

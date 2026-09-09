@@ -338,7 +338,7 @@ Discovers Socket.io events, WebSocket listeners and emitters, typed event payloa
       "type": "integer",
       "default": 50,
       "minimum": 1,
-      "maximum": 200,
+      "maximum": 100,
       "description": "Maximum number of events to return."
     },
     "cursor": {
@@ -388,7 +388,7 @@ Synthesizes living technical documentation structured according to the Diátaxis
       "type": "string",
       "description": "Alias for outputDir."
     },
-    "includeSourceRef": {
+    "include_tests": {
       "type": "boolean",
       "default": true,
       "description": "Include source code references in generated documents."

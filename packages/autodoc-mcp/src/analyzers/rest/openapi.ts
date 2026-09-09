@@ -7,12 +7,12 @@
  * `#/components/schemas` $refs.
  */
 
-import { join } from "node:path";
+import { join, resolve, sep } from "node:path";
 import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { z } from "zod";
 import { RestAnalyzer } from "./index.js";
 import { SchemaAnalyzer, type DataModelContract } from "../schema/index.js";
-import { getLlmEnrichment } from "../../llm/enrichment.js";
+import { getLlmEnrichment, sanitizeForPrompt } from "../../llm/enrichment.js";
 import { generateJson } from "../../llm/structured.js";
 import {
   extractPathParams,
@@ -115,7 +115,7 @@ export class OpenApiGenerator {
     const paths = document.paths as Record<string, Record<string, any>>;
     for (const [path, item] of Object.entries(paths)) {
       for (const op of Object.values(item)) {
-        const evidence = op?.["x-source-file"] ? `source: ${op["x-source-file"]}` : "";
+        const evidence = sanitizeForPrompt(op?.["x-source-file"] ? `source: ${op["x-source-file"]}` : "", "openapi_evidence");
         const result = await generateJson(
           enrichment.provider,
           `Write a concise OpenAPI summary and description for this API operation.\nOperation: ${op?.summary ?? path}\nEvidence: ${evidence}`,
@@ -145,6 +145,9 @@ export class OpenApiGenerator {
   private buildOperations(endpoints: ReturnType<RestAnalyzer["discoverEndpoints"]>): ApiOperationContract[] {
     const operations: ApiOperationContract[] = [];
     const seen = new Map<string, ApiOperationContract>();
+    // Cache file reads: multiple endpoints in the same source file share one
+    // readFileSync (routes files commonly hold 10-50 endpoints).
+    const fileBodyCache = new Map<string, string | undefined>();
     let requestBodyOverride: ApiOperationContract["requestBody"];
 
     for (const ep of endpoints) {
@@ -152,7 +155,12 @@ export class OpenApiGenerator {
       if (!["GET", "POST", "PUT", "DELETE", "PATCH"].includes(method)) continue;
 
       const framework = FRAMEWORK_BY_EXT[extOf(ep.sourceFile)] || "node";
-      const handlerBody = extractHandlerWindow(readHandlerBody(this.repoPath, ep.sourceFile), ep.endpoint, ep.method);
+      const fileBodyOnce = () => {
+        const key = ep.sourceFile ?? "";
+        if (!fileBodyCache.has(key)) fileBodyCache.set(key, readHandlerBody(this.repoPath, ep.sourceFile));
+        return fileBodyCache.get(key);
+      };
+      const handlerBody = extractHandlerWindow(fileBodyOnce(), ep.endpoint, ep.method);
 
       const pathParams = extractPathParams(ep.endpoint);
       const handlerParams = handlerBody ? extractHandlerParams(handlerBody, framework) : [];
@@ -162,7 +170,7 @@ export class OpenApiGenerator {
       // Fallback: the window may only see `const { a, b } = req.body` while the
       // validator (e.g. Zod) is declared at file scope — prefer the richer
       // file-level schema when it fully covers the window's destructure.
-      const fileBody = readHandlerBody(this.repoPath, ep.sourceFile);
+      const fileBody = fileBodyOnce();
       if (fileBody && handlerBody !== fileBody) {
         const fileLevelBody = extractRequestBody(fileBody, method, framework);
         if (fileLevelBody && isRicherSchema(fileLevelBody, requestBody)) {
@@ -534,7 +542,12 @@ function extractHandlerWindow(
 function readHandlerBody(repoPath: string, sourceFile?: string): string | undefined {
   if (!sourceFile) return undefined;
   try {
-    return readFileSync(join(repoPath, sourceFile), "utf-8");
+    const resolved = resolve(join(repoPath, sourceFile));
+    // Defensive containment: sourceFile comes from the analyzer's own walk,
+    // but if it ever carried an absolute or traversing path the read would
+    // escape the target repository.
+    if (!resolved.startsWith(resolve(repoPath) + sep) && resolved !== resolve(repoPath)) return undefined;
+    return readFileSync(resolved, "utf-8");
   } catch {
     return undefined;
   }
