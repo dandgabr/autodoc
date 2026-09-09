@@ -93,6 +93,12 @@ npm run build -w @autodoc/mcp
 # 4. Run tests
 cargo test -p autodoc-core
 npm test -w @autodoc/mcp
+
+# 5. (Optional) Enable local LLM enrichment with GPU acceleration
+./scripts/setup-llm.sh                    # Linux / macOS
+.\scripts\setup-llm.ps1                   # Windows
+# Detects your GPU (NVIDIA/AMD/Intel/Apple), installs toolchains, downloads
+# the model and builds the best backend. See docs/how-to/gpu-setup.md.
 ```
 
 ---

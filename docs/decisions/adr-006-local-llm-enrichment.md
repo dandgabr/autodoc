@@ -18,7 +18,7 @@ AutoDoc relied exclusively on regex/AST heuristics. The operator wanted a local 
 8. Docs at `docs/how-to/local-llm-enrichment.md`.
 
 ## Consequences
-- Verified: hardware detection works on the dev host (CUDA, 5.5 GB free VRAM → auto-selects `large`); graceful no-model fallback (`llmEnrichedAvailable: false`).
+- Verified: hardware detection works on GPU-equipped hosts (CUDA/Vulkan/SYCL probes) and gracefully degrades to deterministic fallback when no model is present (`llmEnrichedAvailable: false`).
 - Full pipeline active only after `npm install node-llama-cpp` + GGUF download; otherwise all behavior unchanged (regex-only).
 - Tool count is now 11; tests updated (50/50 passing).
 
@@ -36,8 +36,9 @@ The pipeline was built, compiled and exercised end-to-end against the AutoDoc re
 ## GPU acceleration amendments (2026-09-09)
 
 1. **Vendor-agnostic backend detection** (`llm/hardware.ts`): probes every GPU stack independently — CUDA/NVIDIA (`nvidia-smi`), ROCm/AMD (`rocm-smi`), Intel oneAPI SYCL (`sycl-ls`), Vulkan (`vulkaninfo --summary`, excluding software renderers), Metal (`powermetrics`) — and selects the highest-priority backend the runtime can use, with CPU fallback. `detectedVia` records every probed source.
-2. **Vulkan backend live on RTX 3060**: `glslc` (dnf shaderc) + vendored SPIRV-Headers (llama.cpp needs a CMake CONFIG package missing from distro packages; clone KhronosGroup/SPIRV-Headers, `cmake --install` to a prefix, set `CMAKE_PREFIX_PATH`). Patched `ggml-vulkan/CMakeLists.txt` to link `SPIRV-Headers::SPIRV-Headers` (missing include propagation caused `spirv/unified1/spirv.hpp: No such file`).
-3. **CUDA backend live on GCC 16 hosts**: nvcc 13.3 rejects GCC > 15; resolved without root via `--allow-unsupported-compiler`. `factory.ts` exports `$CUDA_PATH/bin` onto `PATH` and, when `AUTODOC_CUDA_ALLOW_UNSUPPORTED_COMPILER=1`, sets `NODE_LLAMA_CPP_CMAKE_OPTION_CMAKE_CUDA_FLAGS=--allow-unsupported-compiler` on `process.env` (consumed by node-llama-cpp's `customCmakeOptionsEnvVarPrefix` mechanism). The alternative with root is `dnf install gcc15 gcc15-c++` + `CUDA_HOST_COMPILER=/usr/bin/gcc15`.
-4. **Measured performance** (enriched ADR call, Qwen2.5-Coder-3B Q4_K_M): CPU ~63 s → Vulkan ~13–15 s → **CUDA ~12 s** (~5x vs CPU). Both CUDA and Vulkan addons built and functional; runtime resolution order follows node-llama-cpp's build detection, with automatic fallback between backends.
-5. Backend semantics: `hardware.device` reports the best detection priority (cuda when nvidia-smi exists); `activeModel.device` in `autodoc_llm_status` reports the backend node-llama-cpp actually loaded.
-6. Execution records: ai-memory `notes/gpu-acceleration-live.md`, `notes/cuda-gcc16-resolution.md`.
+2. **Vulkan backend**: `glslc` (shaderc) is required. llama.cpp also needs SPIRV-Headers with a CMake CONFIG package, which some distros ship outdated or without the config module; the automated setup script vendors the headers from KhronosGroup into a local prefix when needed and patches `ggml-vulkan/CMakeLists.txt` to link `SPIRV-Headers::SPIRV-Headers` (missing include propagation causes `spirv/unified1/spirv.hpp: No such file`).
+3. **CUDA backend on newer-GCC hosts**: nvcc rejects host GCC versions newer than its supported list (e.g. nvcc 13.x rejects GCC > 15). Two resolutions, both automated/assisted by the setup script: (a) without root, pass `--allow-unsupported-compiler` — `factory.ts` exports `$CUDA_PATH/bin` onto `PATH` and, when `AUTODOC_CUDA_ALLOW_UNSUPPORTED_COMPILER=1`, sets `NODE_LLAMA_CPP_CMAKE_OPTION_CMAKE_CUDA_FLAGS=--allow-unsupported-compiler` on `process.env` (consumed by node-llama-cpp's `customCmakeOptionsEnvVarPrefix` mechanism); (b) with root/package manager, install a supported GCC side-by-side and point `CUDA_HOST_COMPILER` at it.
+4. **Measured performance** (enriched ADR call, Qwen2.5-Coder-3B Q4_K_M, consumer laptop-class discrete GPU): CPU ~63 s → Vulkan ~13–15 s → CUDA ~12 s (~5x vs CPU). Both CUDA and Vulkan addons built and functional; runtime resolution order follows node-llama-cpp's build detection, with automatic fallback between backends.
+5. Backend semantics: `hardware.device` reports the best detection priority; `activeModel.device` in `autodoc_llm_status` reports the backend node-llama-cpp actually loaded.
+6. Setup automation: `scripts/setup-llm.sh` (Linux/macOS) and `scripts/setup-llm.ps1` (Windows) detect GPU vendor, install missing toolchains where possible, download the model and build the best available backend. See `docs/how-to/gpu-setup.md`.
+7. Execution records: ai-memory `notes/gpu-acceleration-live.md`, `notes/cuda-gcc16-resolution.md`.

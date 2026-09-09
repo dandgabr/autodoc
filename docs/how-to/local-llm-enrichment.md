@@ -35,49 +35,16 @@ Search order for local weights: `$AUTODOC_LLM_MODELS_DIR` → `./.autodoc/models
 
 Inference automatically prefers the fastest GPU backend available on the host, falling back to CPU:
 
-| Priority | Backend | Requires | Detection |
-|---|---|---|---|
-| 1 | **CUDA / NVIDIA** | CUDA toolkit (`nvcc`) + GCC ≤ 15 (nvcc constraint) | `nvidia-smi` |
-| 2 | **ROCm / AMD** | ROCm toolkit (`rocm-smi`, `hipcc`) | `rocm-smi` |
-| 3 | **Intel oneAPI SYCL** | oneAPI base toolkit (`sycl-ls` showing GPU devices) | `sycl-ls` |
-| 4 | **Vulkan** | `glslc` (shaderc) + `vulkaninfo` with a real GPU | `vulkaninfo --summary` |
-| 5 | **Metal** | macOS native | `powermetrics` |
-| — | **CPU fallback** | none | no GPU detected |
+| Priority | Backend | Vendor |
+|---|---|---|
+| 1 | CUDA | NVIDIA |
+| 2 | ROCm | AMD |
+| 3 | oneAPI SYCL | Intel / NVIDIA via plugin |
+| 4 | Vulkan | Universal (any vendor) |
+| 5 | Metal | Apple (macOS) |
+| — | CPU fallback | Any host |
 
-Detection probes every stack independently (a host may expose several, e.g. NVIDIA CUDA + Vulkan + Intel iGPU). The reported `device` field reflects the highest-priority backend; the actual backend used by `node-llama-cpp` is shown in `autodoc_llm_status` under `activeModel.device`.
-
-**Fedora host notes (RTX 3060 example)**:
-
-```bash
-# Vulkan path (lightweight, no CUDA toolkit needed)
-sudo dnf install glslc  # shaderc compiler for Vulkan shaders
-# llama.cpp needs SPIRV-Headers with a CMake config; if the distro package
-# is too old, vendor it locally and rebuild:
-git clone --depth 1 https://github.com/KhronosGroup/SPIRV-Headers.git /tmp/spirv
-cmake -S /tmp/spirv -B /tmp/spirv/build -DCMAKE_INSTALL_PREFIX=/tmp/spirv/prefix
-cmake --install /tmp/spirv/build
-export CMAKE_PREFIX_PATH=/tmp/spirv/prefix
-
-# Trigger the GPU build (downloads llama.cpp and compiles with Vulkan):
-node node_modules/node-llama-cpp/dist/cli/cli.js source build --gpu vulkan
-```
-
-CUDA builds require GCC ≤ 15. On hosts with newer GCC (e.g. Fedora 44 ships GCC 16), pick one of:
-
-```bash
-# Option A (no root): allow the unsupported compiler — validated working with GCC 16 + CUDA 13.3
-export AUTODOC_CUDA_ALLOW_UNSUPPORTED_COMPILER=1
-export CUDA_PATH=/usr/local/cuda
-export PATH="$CUDA_PATH/bin:$PATH"
-node node_modules/node-llama-cpp/dist/cli/cli.js source build --gpu cuda
-
-# Option B (with root): install GCC 15 side-by-side
-sudo dnf install -y gcc15 gcc15-c++
-export CUDA_HOST_COMPILER=/usr/bin/gcc15
-node node_modules/node-llama-cpp/dist/cli/cli.js source build --gpu cuda
-```
-
-At runtime, AutoDoc re-exports these automatically: if `CUDA_PATH` is set, its `bin/` is prepended to `PATH`, and `AUTODOC_CUDA_ALLOW_UNSUPPORTED_COMPILER=1` translates to the `--allow-unsupported-compiler` CMake flag. Backend priority: CUDA > ROCm > SYCL > Vulkan > Metal > CPU.
+Automated setup: run `scripts/setup-llm.sh` (Linux/macOS) or `scripts/setup-llm.ps1` (Windows) — it detects the GPU, installs missing toolchains, downloads the model and builds the best backend. Full OS-by-OS instructions, manual build steps and troubleshooting: [GPU Setup](./gpu-setup.md).
 
 ### 4. Environment variables
 
