@@ -53,8 +53,22 @@ async function createNodeLlamaProvider(resolved: ResolvedModel, config: LlmConfi
     const mod = (await (new Function("m", "return import(m)")("node-llama-cpp").catch(() => null))) as any;
     if (!mod) return null;
     const { getLlama, LlamaChatSession } = mod;
+
+    // GPU build environment: make CUDA toolchain visible and work around
+    // nvcc/gcc version mismatches without requiring root. Vulkan builds
+    // additionally need SPIRV-Headers discoverable via CMAKE_PREFIX_PATH.
+    // These are set on process.env because compileLLamaCpp defaults its env
+    // to the parent process environment.
+    if (process.env.CUDA_PATH && !process.env.PATH?.includes(`${process.env.CUDA_PATH}/bin`)) {
+      process.env.PATH = `${process.env.CUDA_PATH}/bin:${process.env.PATH ?? ""}`;
+    }
+    if (process.env.AUTODOC_CUDA_ALLOW_UNSUPPORTED_COMPILER === "1") {
+      process.env.NODE_LLAMA_CPP_CMAKE_OPTION_CMAKE_CUDA_FLAGS = "--allow-unsupported-compiler";
+    }
+
     const llama = await getLlama({
-      ...(resolved.source === "operator-override" || resolved.source === "env-configured" ? {} : {}),
+      gpu: "auto",
+      build: "auto",
     });
     const contextTokens = config.contextTokens ?? Math.min(resolved.spec.contextTokens, 16384);
     const model = await llama.loadModel({ modelPath: resolved.weightsPath });
