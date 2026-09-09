@@ -22,7 +22,7 @@ This directory is the on-repository mirror of the project's full decision tree, 
 3. ADR-003b/003c — discovery engine and polyglot/realtime evolution.
 4. ADR-004 — precision lessons from the first external benchmark.
 5. ADR-005 — the OpenAPI contract compiler (regex-based operation extraction).
-6. ADR-006 — the local LLM enrichment layer (≤5 GB) that augments (never replaces) the deterministic pipeline.
+6. ADR-006 — the local LLM enrichment layer (≤5 GB) that augments (never replaces) the deterministic pipeline; includes GPU backend priority (CUDA > ROCm > SYCL > Vulkan > Metal > CPU) and licensing posture for the node-llama-cpp/llama.cpp/GGUF stack.
 
 ## Governance
 
