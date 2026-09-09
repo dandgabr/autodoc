@@ -89,6 +89,8 @@ Inventories inbound and outbound service endpoints spanning 30 years of enterpri
 | `limit` | integer | No | Pagination limit (1-100, default: 50). |
 | `cursor` | string | No | Cursor for paginated traversal. |
 | `include_tests` | boolean | No | `false` | Whether to include test suites and mock files in discovery. |
+| `llm_enrich` | boolean | No | `false` | LLM-aware two-pass validation: ambiguous pass-1 candidates (routes without a resolved mount prefix) go to LLM classification; rejected candidates are pruned and the response includes a `candidatesReviewed`/`candidatesRejected` report. |
+| `model_profile` | string | No | `auto` | Model profile for LLM enrichment. |
 
 ---
 

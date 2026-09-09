@@ -62,7 +62,22 @@ export CMAKE_PREFIX_PATH=/tmp/spirv/prefix
 node node_modules/node-llama-cpp/dist/cli/cli.js source build --gpu vulkan
 ```
 
-CUDA builds require GCC ≤ 15; on hosts with newer GCC (e.g. Fedora 44 ships GCC 16), install an older compiler toolchain or use the Vulkan path.
+CUDA builds require GCC ≤ 15. On hosts with newer GCC (e.g. Fedora 44 ships GCC 16), pick one of:
+
+```bash
+# Option A (no root): allow the unsupported compiler — validated working with GCC 16 + CUDA 13.3
+export AUTODOC_CUDA_ALLOW_UNSUPPORTED_COMPILER=1
+export CUDA_PATH=/usr/local/cuda
+export PATH="$CUDA_PATH/bin:$PATH"
+node node_modules/node-llama-cpp/dist/cli/cli.js source build --gpu cuda
+
+# Option B (with root): install GCC 15 side-by-side
+sudo dnf install -y gcc15 gcc15-c++
+export CUDA_HOST_COMPILER=/usr/bin/gcc15
+node node_modules/node-llama-cpp/dist/cli/cli.js source build --gpu cuda
+```
+
+At runtime, AutoDoc re-exports these automatically: if `CUDA_PATH` is set, its `bin/` is prepended to `PATH`, and `AUTODOC_CUDA_ALLOW_UNSUPPORTED_COMPILER=1` translates to the `--allow-unsupported-compiler` CMake flag. Backend priority: CUDA > ROCm > SYCL > Vulkan > Metal > CPU.
 
 ### 4. Environment variables
 
@@ -73,6 +88,10 @@ CUDA builds require GCC ≤ 15; on hosts with newer GCC (e.g. Fedora 44 ships GC
 | `AUTODOC_LLM_SERVER_URL` | Use the external llama-server adapter. |
 | `AUTODOC_LLM_MODELS_DIR` | Extra directory scanned for weights. |
 | `AUTODOC_LLM_TIMEOUT_MS` | Generation timeout (default 120000). |
+| `AUTODOC_CUDA_ALLOW_UNSUPPORTED_COMPILER` | `1` passes `--allow-unsupported-compiler` to CUDA builds (needed when nvcc < GCC version). |
+| `AUTODOC_BENCHMARK_REPO` | External benchmark monorepo path for the agnostic-analyzer test suite. |
+| `CUDA_PATH` | CUDA toolkit root; its `bin/` is prepended to `PATH` for builds. |
+| `CMAKE_PREFIX_PATH` | Extra CMake package search path (e.g. vendored SPIRV-Headers for Vulkan). |
 
 ## Per-tool control
 
@@ -82,6 +101,7 @@ Every LLM-aware tool accepts `model_profile` (`small|mid|large|auto`) and `llm_e
 - `autodoc_export_openapi` — `llm_enrich: true` adds LLM-written summaries/descriptions (structure remains deterministic).
 - `autodoc_get_c4_diagram` — `llm_enrich: true` refines node descriptions.
 - `autodoc_generate_adr` — `llm_enrich: true` synthesizes Context/Decision/Consequences.
+- `autodoc_list_api_contracts` — `llm_enrich: true` runs two-pass validation: regex pass-1 remains the source of truth; ambiguous candidates (routes without a resolved mount prefix) go to LLM pass-2 and rejected candidates are pruned, with a `candidatesReviewed`/`candidatesRejected` report.
 - `autodoc_list_api_contracts` / analyzers — two-pass hybrid when `llmEnrichment` is enabled in code.
 
 ## Guarantees
