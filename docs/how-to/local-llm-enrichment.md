@@ -31,7 +31,40 @@ Search order for local weights: `$AUTODOC_LLM_MODELS_DIR` → `./.autodoc/models
 - **node-llama-cpp** (default, in-process): `npm install node-llama-cpp` in `packages/autodoc-mcp`. Loaded lazily; if absent, the `llama-server` adapter is used.
 - **llama-server** (external, llama.cpp): start `llama-server -m <gguf> --port 8080` and set `AUTODOC_LLM_SERVER_URL=http://127.0.0.1:8080`.
 
-### 3. Environment variables
+### 3. GPU acceleration (recommended)
+
+Inference automatically prefers the fastest GPU backend available on the host, falling back to CPU:
+
+| Priority | Backend | Requires | Detection |
+|---|---|---|---|
+| 1 | **CUDA / NVIDIA** | CUDA toolkit (`nvcc`) + GCC ≤ 15 (nvcc constraint) | `nvidia-smi` |
+| 2 | **ROCm / AMD** | ROCm toolkit (`rocm-smi`, `hipcc`) | `rocm-smi` |
+| 3 | **Intel oneAPI SYCL** | oneAPI base toolkit (`sycl-ls` showing GPU devices) | `sycl-ls` |
+| 4 | **Vulkan** | `glslc` (shaderc) + `vulkaninfo` with a real GPU | `vulkaninfo --summary` |
+| 5 | **Metal** | macOS native | `powermetrics` |
+| — | **CPU fallback** | none | no GPU detected |
+
+Detection probes every stack independently (a host may expose several, e.g. NVIDIA CUDA + Vulkan + Intel iGPU). The reported `device` field reflects the highest-priority backend; the actual backend used by `node-llama-cpp` is shown in `autodoc_llm_status` under `activeModel.device`.
+
+**Fedora host notes (RTX 3060 example)**:
+
+```bash
+# Vulkan path (lightweight, no CUDA toolkit needed)
+sudo dnf install glslc  # shaderc compiler for Vulkan shaders
+# llama.cpp needs SPIRV-Headers with a CMake config; if the distro package
+# is too old, vendor it locally and rebuild:
+git clone --depth 1 https://github.com/KhronosGroup/SPIRV-Headers.git /tmp/spirv
+cmake -S /tmp/spirv -B /tmp/spirv/build -DCMAKE_INSTALL_PREFIX=/tmp/spirv/prefix
+cmake --install /tmp/spirv/build
+export CMAKE_PREFIX_PATH=/tmp/spirv/prefix
+
+# Trigger the GPU build (downloads llama.cpp and compiles with Vulkan):
+node node_modules/node-llama-cpp/dist/cli/cli.js source build --gpu vulkan
+```
+
+CUDA builds require GCC ≤ 15; on hosts with newer GCC (e.g. Fedora 44 ships GCC 16), install an older compiler toolchain or use the Vulkan path.
+
+### 4. Environment variables
 
 | Variable | Purpose |
 |---|---|
