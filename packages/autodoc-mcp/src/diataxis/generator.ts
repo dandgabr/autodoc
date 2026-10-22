@@ -8,12 +8,17 @@ import { HonestyAnalyzer, DeadCodeItem } from "../analyzers/honesty/index.js";
 import { WorkspaceAnalyzer, WorkspaceInfo } from "../analyzers/workspace.js";
 import { ContainerInfraAnalyzer, ContainerInfraReport } from "../analyzers/containers.js";
 import { DiagramRenderer } from "../diagrams/renderer.js";
+import { DocumentationExporter } from "./exporter.js";
+import type { SnapshotContext } from "../analysis/snapshot.js";
+import { type ArchitectureMapKind, type MapProjection } from "../analysis/map.js";
 
 export interface GeneratedDocFile {
   relativePath: string;
   title: string;
   content: string;
   quadrant: "tutorials" | "how-to" | "reference" | "explanation";
+  scanId?: string;
+  repositoryRoot?: string;
 }
 
 export interface DiscoveredModuleInfo {
@@ -28,6 +33,7 @@ export interface DiscoveredModuleInfo {
 
 export interface DiataxisGeneratorOptions {
   includeTests?: boolean;
+  snapshot?: SnapshotContext;
 }
 
 export class DiataxisGenerator {
@@ -40,17 +46,54 @@ export class DiataxisGenerator {
   private honestyAnalyzer: HonestyAnalyzer;
   private workspaceInfo: WorkspaceInfo;
   private containerReport: ContainerInfraReport;
+  private snapshot?: SnapshotContext;
 
   constructor(repoPath: string = process.cwd(), options: DiataxisGeneratorOptions = {}) {
     this.repoPath = repoPath;
     this.includeTests = options.includeTests ?? false;
-    this.archAnalyzer = new ArchitectureAnalyzer(repoPath);
-    this.restAnalyzer = new RestAnalyzer(repoPath, { includeTests: this.includeTests });
-    this.realtimeAnalyzer = new RealtimeAnalyzer(repoPath, { includeTests: this.includeTests });
-    this.schemaAnalyzer = new SchemaAnalyzer(repoPath, { includeTests: this.includeTests });
-    this.honestyAnalyzer = new HonestyAnalyzer(repoPath);
-    this.workspaceInfo = new WorkspaceAnalyzer(repoPath).analyze();
-    this.containerReport = new ContainerInfraAnalyzer(repoPath).analyze();
+    this.snapshot = options.snapshot;
+    this.archAnalyzer = new ArchitectureAnalyzer(repoPath, this.snapshot);
+    this.restAnalyzer = new RestAnalyzer(repoPath, { includeTests: this.includeTests, snapshot: this.snapshot });
+    this.realtimeAnalyzer = new RealtimeAnalyzer(repoPath, { includeTests: this.includeTests, snapshot: this.snapshot });
+    this.schemaAnalyzer = new SchemaAnalyzer(repoPath, { includeTests: this.includeTests, snapshot: this.snapshot });
+    this.honestyAnalyzer = new HonestyAnalyzer(repoPath, this.snapshot);
+    this.workspaceInfo = new WorkspaceAnalyzer(repoPath, this.snapshot).analyze();
+    this.containerReport = new ContainerInfraAnalyzer(repoPath, this.snapshot).analyze();
+  }
+
+  private projectionDiagram(projection: MapProjection, level: number, title: string): string {
+    const nodes = projection.nodes.map((node) => ({
+      id: node.id, label: node.label, desc: node.kind, type: "component" as const,
+      technology: typeof node.attributes?.category === "string" ? node.attributes.category : undefined,
+      state: node.state, evidenceIds: node.evidenceIds,
+    }));
+    const edges = projection.relations.filter((relation) => relation.state === "confirmed" && relation.toId !== null)
+      .map((relation) => ({ id: relation.id, from: relation.fromId, to: relation.toId!, label: relation.kind, state: "confirmed" as const, evidenceIds: relation.evidenceIds }));
+    return DiagramRenderer.renderC4Mermaid({ level, title, nodes, edges });
+  }
+
+  private renderProjectionIndex(kinds: ArchitectureMapKind[]): string {
+    if (!this.snapshot) return "";
+    const sections = kinds.map((kind) => {
+      const projection = this.archAnalyzer.getArchitectureMap(kind);
+      const inventoryOnly = projection.nodes.length > 0 && projection.nodes.every((node) => node.state === "inventory");
+      const state = projection.nodes.length === 0 ? "UNSUPPORTED" : projection.coverage.state !== "complete" || (kind === "infrastructure" && inventoryOnly) ? "PARTIAL" : "AVAILABLE";
+      return [
+        `## ${kind}`,
+        "",
+        `State: **${state}**. Coverage: **${projection.coverage.state}**. Scan: \`${projection.scanId}\`.`,
+        projection.nodes.length === 0 ? "No supported facts are persisted for this map." : "",
+        "",
+        "### Nodes",
+        "",
+        ...(projection.nodes.length ? projection.nodes.map((node) => `- \`${node.id}\` — ${node.label} (${node.state}; evidence: ${node.evidenceIds.join(", ") || "none"})`) : ["_None._"]),
+        "",
+        "### Relations",
+        "",
+        ...(projection.relations.length ? projection.relations.map((relation) => `- \`${relation.id}\`: \`${relation.fromId}\` → \`${relation.toId ?? "unresolved"}\` (${relation.kind}; ${relation.state}; evidence: ${relation.evidenceIds.join(", ") || "none"})`) : ["_None._"]),
+      ].filter((line) => line !== undefined).join("\n");
+    });
+    return ["# Repository Maps", "", `Repository: \`${this.snapshot.repositoryRoot}\``, `Scan: \`${this.snapshot.scanId}\``, "", ...sections].join("\n");
   }
 
   public synthesizeFullDocumentation(): GeneratedDocFile[] {
@@ -58,10 +101,15 @@ export class DiataxisGenerator {
     const repoName = this.workspaceInfo.rootName || basename(this.repoPath);
 
     // 1. QUADRANT: Explanation / Architecture
-    const c4Context = this.archAnalyzer.getArchitectureGraph(1);
-    const c4Container = this.archAnalyzer.getArchitectureGraph(2);
-    const mermaidContext = DiagramRenderer.renderC4Mermaid(c4Context);
-    const mermaidContainer = DiagramRenderer.renderC4Mermaid(c4Container);
+    const c4ContextProjection = this.snapshot ? this.archAnalyzer.getArchitectureMap("context") : undefined;
+    const c4ContainerProjection = this.snapshot ? this.archAnalyzer.getArchitectureMap("infrastructure") : undefined;
+    const c4Container = this.snapshot ? undefined : this.archAnalyzer.getArchitectureGraph(2);
+    const mermaidContext = c4ContextProjection
+      ? this.projectionDiagram(c4ContextProjection, 1, `${repoName} - C4 Level 1: Repository Context`)
+      : DiagramRenderer.renderC4Mermaid(this.archAnalyzer.getArchitectureGraph(1));
+    const mermaidContainer = c4ContainerProjection
+      ? this.projectionDiagram(c4ContainerProjection, 2, `${repoName} - C4 Level 2: Infrastructure Inventory`)
+      : DiagramRenderer.renderC4Mermaid(c4Container!);
 
     docs.push({
       relativePath: "architecture/system-overview.md",
@@ -92,6 +140,15 @@ export class DiataxisGenerator {
       ].join("\n"),
     });
 
+    if (this.snapshot) {
+      docs.push({
+        relativePath: "architecture/repository-maps.md",
+        title: "Repository Maps",
+        quadrant: "explanation",
+        content: this.renderProjectionIndex(["context", "structure", "imports", "entrypoints", "infrastructure", "code"]),
+      });
+    }
+
     // Honesty Policy & Quirks Report
     const honesty = this.honestyAnalyzer.generateHonestyReport();
     docs.push({
@@ -103,7 +160,7 @@ export class DiataxisGenerator {
         "",
         `Generated at: \`${honesty.timestamp}\``,
         "",
-        `Total Divergences Detected: **${honesty.totalDeadCodeCount}**`,
+        `Analysis coverage: **${honesty.coverage}**. Candidate findings: **${honesty.candidateCount}**. No candidate count proves code is dead.`,
         "",
         "## 1. Dead Declared Socket Events",
         honesty.deadDeclaredEvents.length === 0
@@ -124,9 +181,9 @@ export class DiataxisGenerator {
               .map((u: DeadCodeItem) => `- **\`${u.name}\`** (\`${u.sourceFile}\`): ${u.reason}`)
               .join("\n"),
         "",
-        "## 3. Orphan Function Symbols",
+        "## 3. Functions Without a Confirmed Caller (Candidates)",
         honesty.orphanSymbols.length === 0
-          ? "_Zero unreachable symbols detected._"
+          ? "_No candidates were found in the available call graph; coverage may be incomplete._"
           : honesty.orphanSymbols
               .map((s: DeadCodeItem) => `- **\`${s.name}\`** (\`${s.sourceFile}\`): ${s.reason}`)
               .join("\n"),
@@ -135,7 +192,7 @@ export class DiataxisGenerator {
 
     // 2. QUADRANT: Reference (Information-oriented)
     // HTTP Endpoints
-    const endpoints = this.restAnalyzer.discoverEndpoints("ALL", 200);
+    const endpoints = this.restAnalyzer.discoverEndpoints("ALL", Number.MAX_SAFE_INTEGER);
     const endpointRows = endpoints.map(
       (e: DiscoveredEndpoint) =>
         `| \`${e.method}\` | \`${e.endpoint}\` | ${e.protocol} | ${e.auth || "None"} | \`${e.sourceFile || "routes"}\` |`
@@ -157,7 +214,7 @@ export class DiataxisGenerator {
     });
 
     // Socket Events
-    const socketEvents = this.realtimeAnalyzer.discoverSocketContracts("ALL", 250);
+    const socketEvents = this.realtimeAnalyzer.discoverSocketContracts("ALL", Number.MAX_SAFE_INTEGER);
     const socketRows = socketEvents.map(
       (s: DiscoveredSocketEvent) =>
         `| \`${s.eventName}\` | ${s.direction} | ${s.protocol} | \`${s.payloadType || "any"}\` | ${
@@ -181,8 +238,8 @@ export class DiataxisGenerator {
     });
 
     // Data Models
-    const rootModels = this.schemaAnalyzer.discoverModels(150, false);
-    const allModels = this.schemaAnalyzer.discoverModels(200, true);
+    const rootModels = this.schemaAnalyzer.discoverModels(Number.MAX_SAFE_INTEGER, false);
+    const allModels = this.schemaAnalyzer.discoverModels(Number.MAX_SAFE_INTEGER, true);
     const subdocuments = allModels.filter((m) => m.isSubdocument);
 
     const renderModelCard = (m: DataModelContract) => {
@@ -242,256 +299,34 @@ export class DiataxisGenerator {
       ].join("\n"),
     });
 
-    // Business Modules Reference Catalog
-    const discoveredModules = this.discoverBusinessModules(endpoints, socketEvents, rootModels);
-    if (discoveredModules.length > 0) {
-      const moduleSummaryRows = discoveredModules.map(
-        (m) =>
-          `| \`${m.id}\` | ${m.kind || "module"} | ${m.routes.length} | ${m.socketEvents.length} | ${m.models.length} | \`${m.dirPath}\` |`
-      );
-
-      docs.push({
-        relativePath: "reference/modules-catalog.md",
-        title: "Business & Game Modules Catalog",
-        quadrant: "reference",
-        content: [
-          `# Business & Game Modules Catalog`,
-          "",
-          `Total Registered Modules: **${discoveredModules.length}**`,
-          "",
-          "| Module ID | Kind | REST Routes | Socket Events | Models | Path |",
-          "| :--- | :--- | :--- | :--- | :--- | :--- |",
-          ...moduleSummaryRows,
-        ].join("\n"),
-      });
-
-      // Also synthesize individual module reference pages
-      for (const mod of discoveredModules) {
-        const modRouteRows = mod.routes.map((r) => `- \`${r.method} ${r.endpoint}\` (${r.auth})`);
-        const modSocketRows = mod.socketEvents.map((s) => `- \`${s.eventName}\` (${s.direction})`);
-        const modModelRows = mod.models.map((m) => `- \`${m.modelName}\` (collection: \`${m.collectionOrTable}\`)`);
-
-        docs.push({
-          relativePath: `reference/modules/${mod.id}.md`,
-          title: `Module: ${mod.id}`,
-          quadrant: "reference",
-          content: [
-            `# Module Reference: ${mod.id}`,
-            "",
-            `- **Kind**: \`${mod.kind || "game"}\``,
-            `- **Directory**: \`${mod.dirPath}\``,
-            `- **Capabilities Declared**: ${mod.uses.length > 0 ? mod.uses.map((u) => `\`${u}\``).join(", ") : "Standard"}`,
-            "",
-            "## 1. REST Endpoints",
-            modRouteRows.length > 0 ? modRouteRows.join("\n") : "_No dedicated REST endpoints._",
-            "",
-            "## 2. Realtime Socket Events",
-            modSocketRows.length > 0 ? modSocketRows.join("\n") : "_No dedicated realtime socket events._",
-            "",
-            "## 3. Data Models & Discriminators",
-            modModelRows.length > 0 ? modModelRows.join("\n") : "_Uses shared match discriminator or transient state._",
-          ].join("\n"),
-        });
-      }
-    }
-
-    // 3. QUADRANT: Tutorials (Learning-oriented)
+    // Tutorials only describe workflows supported by detected manifests and scripts.
     const pm = this.workspaceInfo.packageManager;
     const cmds = this.workspaceInfo.commands;
-    const nvmVersion = this.readNvmVersion();
-
-    const containerInstruction = this.buildContainerInstructions();
-
-    docs.push({
-      relativePath: "tutorials/getting-started.md",
-      title: "Getting Started Developer Guide",
-      quadrant: "tutorials",
-      content: [
+    if (pm !== "unknown") {
+      const workflow = [
         `# Getting Started with ${repoName}`,
         "",
-        "## 1. Prerequisites",
-        nvmVersion ? `- Node.js ${nvmVersion}` : "- Node.js >= 22.0.0",
-        `- Package Manager: \`${pm}\``,
-        `- Container Engine: \`${this.containerReport.primaryContainerOrchestration}\` (Docker or Podman)`,
-        "",
-        "## 2. Environment Configuration",
-        "```bash",
-        "# Copy example environment template",
-        "cp .env.example .env",
-        "```",
-        "_Configure database and cache connection variables and authentication secrets declared in `.env.example` (names vary per project: e.g. `DATABASE_URL`, `REDIS_URL`, `AUTH_SECRET`)._",
-        "",
-        "## 3. Start Infrastructure & Development Workflow",
-        ...(this.workspaceInfo.makefile?.devTarget
-          ? [
-              "```bash",
-              "# Recommended shortcut via Makefile (starts backing containers & launches dev servers):",
-              `make ${this.workspaceInfo.makefile.devTarget}`,
-              "```",
-              "",
-              "Alternatively, start backing infrastructure services independently:",
-              "```bash",
-              containerInstruction,
-              "```",
-            ]
-          : [
-              "```bash",
-              containerInstruction,
-              "```",
-            ]),
-        "",
-        "## 4. Install Dependencies & Build",
-        "```bash",
-        `# Install dependencies via ${pm}`,
-        cmds.install,
-        "",
-        "# Build monorepo packages",
-        cmds.build,
-        "```",
-        "",
-        "## 5. Running the Application & Tests",
-        "```bash",
-        this.workspaceInfo.makefile?.devTarget
-          ? `# Run dev server (via package manager or make):\n${cmds.dev}\n# or: make ${this.workspaceInfo.makefile.devTarget}`
-          : `# Run development servers\n${cmds.dev}`,
-        "",
-        "# Run test suite",
-        cmds.test,
-        ...(this.workspaceInfo.makefile?.targets.includes("down")
-          ? ["", "# Stop backing services via Makefile", "make down"]
-          : []),
-        "```",
-      ].join("\n"),
-    });
+        `Detected package manager: \`${pm}\`.`,
+      ];
+      const detectedCommands = [
+        ["Build", cmds.build], ["Test", cmds.test], ["Development", cmds.dev],
+      ].filter((entry): entry is [string, string] => entry[1] !== null);
+      if (detectedCommands.length) {
+        workflow.push("", "## Detected project commands", "", ...detectedCommands.map(([label, command]) => `- **${label}:** \`${command}\``));
+      }
+      docs.push({ relativePath: "tutorials/getting-started.md", title: "Getting Started", quadrant: "tutorials", content: workflow.join("\n") });
+    }
 
-    // 4. QUADRANT: How-To Guides (Task-oriented)
-    docs.push({
-      relativePath: "how-to/add-new-module.md",
-      title: "How-To: Add a New Domain Module",
-      quadrant: "how-to",
-      content: [
-        `# How-To: Add a New Domain Module to ${repoName}`,
-        "",
-        "Follow these architectural steps to create, register, and test a new pluggable domain or game module:",
-        "",
-        "### Step 1: Define Shared Contracts & Schemas",
-        "1. Create a module directory in `packages/shared/src/modules/<module-id>/`.",
-        "2. Define TypeScript types for your game state, client actions, and payload schemas (e.g. using Zod).",
-        "3. Export your schemas and types from the shared package index.",
-        "",
-        "### Step 2: Implement Match Discriminator & Persistence (Optional)",
-        "1. If your module saves game history or matches, define a discriminator schema `matchSchema.ts`.",
-        "2. Export `schema` to contribute custom fields (`config`, `result`, `players[].ext`) to the shared `matches` collection.",
-        "",
-        "### Step 3: Implement Engine State Machine & Socket Handlers",
-        "1. Implement authoritative game rules in `engine.ts`.",
-        "2. Register socket event listeners and room handlers in `socket.ts`.",
-        "",
-        "### Step 4: Register Module via `registerServerModule`",
-        "In `packages/server/src/modules/<module-id>/index.ts`:",
-        "```typescript",
-        "import { registerServerModule } from '../../core/registry.js';",
-        "",
-        "registerServerModule({",
-        "  id: '<module-id>',",
-        "  kind: 'game',",
-        "  uses: ['wallet', 'settings', 'socketRooms'],",
-        "  routers: [{ path: '/api/<module-id>', router: myRouter }],",
-        "  socketEvents: ['<module-id>:action', '<module-id>:state'],",
-        "  matches: { schema: myMatchSchema },",
-        "  socket: (io, socket) => registerHandlers(io, socket),",
-        "});",
-        "```",
-        "",
-        "### Step 5: Enforce Boundary Testing",
-        "Every module must implement boundary tests to guarantee clean room lifecycles and transactions:",
-        "- Create `<module-id>.boundary.test.ts`.",
-        "- Verify room joining, seat reservation, readiness countdown, and disconnect grace period.",
-        "- Verify bet deduction and atomic payout settlement through `WalletService`.",
-        "",
-        "### Step 6: Re-scan Codebase with AutoDoc",
-        "```bash",
-        "# Refresh AST call-graphs, REST routes, and living documentation",
-        "autodoc_scan_repository",
-        "```",
-      ].join("\n"),
-    });
-
-    return docs;
+    return docs.map((doc) => this.snapshot ? {
+      ...doc,
+      scanId: this.snapshot.scanId,
+      repositoryRoot: this.snapshot.repositoryRoot,
+      content: `> Repository snapshot: \`${this.snapshot.scanId}\` at \`${this.snapshot.repositoryRoot}\`.\n\n${doc.content}`,
+    } : doc);
   }
 
   public exportToDirectory(targetDir: string): { totalFiles: number; writtenFiles: string[] } {
-    const docs = this.synthesizeFullDocumentation();
-    const writtenFiles: string[] = [];
-
-    for (const doc of docs) {
-      const fullPath = join(targetDir, doc.relativePath);
-      const parentDir = join(fullPath, "..");
-      mkdirSync(parentDir, { recursive: true });
-      writeFileSync(fullPath, doc.content, "utf-8");
-      writtenFiles.push(doc.relativePath);
-    }
-
-    return {
-      totalFiles: writtenFiles.length,
-      writtenFiles,
-    };
-  }
-
-  private discoverBusinessModules(
-    endpoints: DiscoveredEndpoint[],
-    socketEvents: DiscoveredSocketEvent[],
-    models: DataModelContract[]
-  ): DiscoveredModuleInfo[] {
-    const modules: DiscoveredModuleInfo[] = [];
-    const moduleDirs = [
-      join(this.repoPath, "packages", "server", "src", "modules"),
-      join(this.repoPath, "server", "src", "modules"),
-      join(this.repoPath, "modules"),
-      join(this.repoPath, "apps"),
-    ];
-
-    for (const baseDir of moduleDirs) {
-      if (!existsSync(baseDir)) continue;
-      try {
-        const entries = readdirSync(baseDir);
-        for (const entry of entries) {
-          const modDir = join(baseDir, entry);
-          if (statSync(modDir).isDirectory()) {
-            const modId = entry;
-            const indexPath = join(modDir, "index.ts");
-            const indexContent = existsSync(indexPath) ? readFileSync(indexPath, "utf-8") : "";
-
-            // Parse uses
-            const usesMatch = /uses\s*:\s*\[([^\]]+)\]/.exec(indexContent);
-            const uses = usesMatch
-              ? usesMatch[1].split(",").map((s) => s.trim().replace(/['"`]/g, ""))
-              : [];
-
-            // Filter associated endpoints, events, models
-            const modEndpoints = endpoints.filter((e) => e.sourceFile?.includes(`modules/${modId}`));
-            const modEvents = socketEvents.filter(
-              (s) => s.eventName.startsWith(`${modId}:`) || s.sourceFile.includes(`modules/${modId}`)
-            );
-            const modModels = models.filter((m) => m.sourceFile.includes(`modules/${modId}`));
-
-            modules.push({
-              id: modId,
-              dirPath: `packages/server/src/modules/${modId}`,
-              kind: indexContent.includes('kind: "utility"') ? "utility" : "game",
-              uses,
-              routes: modEndpoints,
-              socketEvents: modEvents,
-              models: modModels,
-            });
-          }
-        }
-      } catch {
-        // Fallback
-      }
-    }
-
-    return modules;
+    return new DocumentationExporter().export(targetDir, this.synthesizeFullDocumentation());
   }
 
   private readNvmVersion(): string | null {

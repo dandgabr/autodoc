@@ -68,10 +68,13 @@ fn test_without_rowid_and_covering_indexes() {
     let temp_dir = tempfile::tempdir().expect("Failed to create tempdir");
     let storage = StorageEngine::new(temp_dir.path()).expect("StorageEngine init failed");
 
-    // Insert edges
-    storage.insert_edge(10, 20, "calls", 1.0).unwrap();
-    storage.insert_edge(10, 30, "calls", 1.0).unwrap();
-    storage.insert_edge(20, 30, "calls", 1.0).unwrap();
+    let file_id = storage.insert_file("src/graph.rs", 1, 1, "graph", "rs").unwrap();
+    let ids: Vec<i64> = (0..30).map(|i| {
+        storage.insert_symbol(file_id, &format!("graph::node_{i}"), &format!("node_{i}"), "function", "pub", i, i, 1, "fn node()", None).unwrap()
+    }).collect();
+    storage.insert_edge(ids[9], ids[19], "calls", 1.0).unwrap();
+    storage.insert_edge(ids[9], ids[29], "calls", 1.0).unwrap();
+    storage.insert_edge(ids[19], ids[29], "calls", 1.0).unwrap();
 
     let conn = storage.reader().unwrap();
     // Query incoming edges to node 30 using covering index
@@ -79,6 +82,6 @@ fn test_without_rowid_and_covering_indexes() {
         "SELECT caller_id, edge_kind FROM edges WHERE callee_id = ?1 ORDER BY caller_id"
     ).unwrap();
 
-    let callers: Vec<i64> = stmt.query_map([30], |r| r.get(0)).unwrap().filter_map(|r| r.ok()).collect();
-    assert_eq!(callers, vec![10, 20]);
+    let callers: Vec<i64> = stmt.query_map([ids[29]], |r| r.get(0)).unwrap().filter_map(|r| r.ok()).collect();
+    assert_eq!(callers, vec![ids[9], ids[19]]);
 }

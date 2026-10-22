@@ -5,6 +5,10 @@ import { WorkspaceAnalyzer, WorkspaceInfo } from "./workspace.js";
 import { ContainerInfraAnalyzer, ContainerInfraReport } from "./containers.js";
 import { SchemaAnalyzer } from "./schema/index.js";
 import { isTestPath } from "./utils.js";
+import { repositoryCachePath } from "../analysis/cache-state.js";
+import type { SnapshotContext } from "../analysis/snapshot.js";
+import { readInventoryFiles, readVerifiedSource, StaleSourceError } from "../analysis/source-reader.js";
+import { buildArchitectureMap, type ArchitectureMapKind, type MapProjection } from "../analysis/map.js";
 
 export interface ArchitectureNode {
   id: string;
@@ -12,6 +16,8 @@ export interface ArchitectureNode {
   desc?: string;
   type?: "person" | "system" | "container" | "component" | "external" | "database";
   technology?: string;
+  state?: "inventory" | "confirmed" | "hypothesis";
+  evidenceIds?: string[];
 }
 
 export interface ArchitectureEdge {
@@ -19,6 +25,9 @@ export interface ArchitectureEdge {
   to: string;
   label?: string;
   technology?: string;
+  id?: string;
+  state?: "confirmed" | "hypothesis";
+  evidenceIds?: string[];
 }
 
 export interface ArchitectureGraph {
@@ -26,6 +35,9 @@ export interface ArchitectureGraph {
   title: string;
   nodes: ArchitectureNode[];
   edges: ArchitectureEdge[];
+  scanId?: string;
+  repositoryRoot?: string;
+  coverage?: MapProjection["coverage"];
 }
 
 export class ArchitectureAnalyzer {
@@ -34,29 +46,52 @@ export class ArchitectureAnalyzer {
   private workspaceInfo: WorkspaceInfo;
   private containerReport: ContainerInfraReport;
   private envKeys: Set<string>;
+  private snapshot?: SnapshotContext;
 
-  constructor(repoPath: string = process.cwd()) {
+  constructor(repoPath: string = process.cwd(), snapshot?: SnapshotContext) {
     this.repoPath = repoPath;
-    this.dbPath = join(repoPath, ".autodoc", "cache.db");
-    this.workspaceInfo = new WorkspaceAnalyzer(repoPath).analyze();
-    this.containerReport = new ContainerInfraAnalyzer(repoPath).analyze();
-    this.envKeys = this.readEnvExampleKeys();
+    this.snapshot = snapshot;
+    this.dbPath = repositoryCachePath(repoPath);
+    this.workspaceInfo = new WorkspaceAnalyzer(repoPath, snapshot).analyze();
+    this.containerReport = new ContainerInfraAnalyzer(repoPath, snapshot).analyze();
+    this.envKeys = snapshot ? new Set() : this.readEnvExampleKeys();
+  }
+
+  public getArchitectureMap(kind: ArchitectureMapKind): MapProjection {
+    if (!this.snapshot) throw new Error("Architecture maps require a pinned SnapshotContext.");
+    return buildArchitectureMap(this.snapshot, kind);
   }
 
   public getArchitectureGraph(level: number = 2, maxNodes: number = 35): ArchitectureGraph {
     const repoName = this.workspaceInfo.rootName || basename(this.repoPath) || "Target System";
     const manifest = this.readManifest();
 
+    if (this.snapshot && level >= 3) {
+      const projection = buildArchitectureMap(this.snapshot, level === 3 ? "structure" : "code");
+      return this.toArchitectureGraph(projection, level, repoName, maxNodes);
+    }
+
     if (level === 1) {
       return this.buildLevel1Context(repoName, manifest);
     } else if (level === 2) {
       return this.buildLevel2Container(repoName, manifest);
+    } else if (level === 3) {
+      return this.buildLevel3Files(repoName, maxNodes);
     } else {
-      return this.buildLevel3Component(repoName, manifest, maxNodes);
+      return this.buildLevel4Code(repoName, manifest, maxNodes);
     }
   }
 
   private readManifest(): Record<string, any> {
+    if (this.snapshot) {
+      const file = readInventoryFiles(this.snapshot).find((item) => item.path === "package.json" && !item.excludedReason);
+      if (!file?.contentSha256) return {};
+      try { return JSON.parse(readVerifiedSource(this.snapshot, file.path).toString("utf8")); }
+      catch (error) {
+        if (error instanceof StaleSourceError) throw error;
+        return {};
+      }
+    }
     const pkgPath = join(this.repoPath, "package.json");
     if (existsSync(pkgPath)) {
       try {
@@ -90,297 +125,54 @@ export class ArchitectureAnalyzer {
     return keys;
   }
 
+  private toArchitectureGraph(projection: MapProjection, level: number, repoName: string, maxNodes: number): ArchitectureGraph {
+    const nodes: ArchitectureNode[] = projection.nodes.slice(0, maxNodes).map((node) => ({
+      id: node.id,
+      label: node.label,
+      desc: node.kind,
+      type: node.kind.startsWith("file:") ? "component" : "component",
+      technology: typeof node.attributes?.category === "string" ? node.attributes.category : undefined,
+      state: node.state,
+      evidenceIds: node.evidenceIds,
+    }));
+    const included = new Set(nodes.map((node) => node.id));
+    const edges: ArchitectureEdge[] = projection.relations
+      .filter((relation) => relation.state === "confirmed" && relation.toId !== null && included.has(relation.fromId) && included.has(relation.toId))
+      .map((relation) => ({ id: relation.id, from: relation.fromId, to: relation.toId!, label: relation.kind, state: "confirmed", evidenceIds: relation.evidenceIds }));
+    const title = level === 3 ? `${repoName} — file map` : `${repoName} - Code Map`;
+    return { level, title, nodes, edges, scanId: projection.scanId, repositoryRoot: projection.repositoryRoot, coverage: projection.coverage };
+  }
+
   private buildLevel1Context(repoName: string, manifest: Record<string, any>): ArchitectureGraph {
-    const allDeps = {
-      ...(manifest.dependencies || {}),
-      ...(manifest.devDependencies || {}),
-    };
-
-    const hasDiscord =
-      this.envKeys.has("DISCORD_CLIENT_ID") ||
-      this.envKeys.has("DISCORD_CLIENT_SECRET") ||
-      allDeps["passport-discord"] ||
-      allDeps["@better-auth/cli"];
-
-    const hasCloudflareSfu =
-      this.envKeys.has("CLOUDFLARE_CALLS_APP_ID") ||
-      this.envKeys.has("CLOUDFLARE_CALLS_APP_SECRET") ||
-      existsSync(join(this.repoPath, "packages", "server", "src", "services", "cloudflareSfu.ts"));
-
-    const hasTurnstile = this.envKeys.has("TURNSTILE_SECRET_KEY") || this.envKeys.has("VITE_TURNSTILE_SITE_KEY");
-    const hasR2OrS3 = this.envKeys.has("R2_ACCESS_KEY_ID") || this.envKeys.has("AWS_ACCESS_KEY_ID");
-
-    const hasMongo =
-      allDeps["mongoose"] ||
-      allDeps["mongodb"] ||
-      this.containerReport.services.some((s) => s.technology.includes("MongoDB")) ||
-      this.envKeys.has("MONGODB_URI");
-
-    const hasValkeyOrRedis =
-      allDeps["redis"] ||
-      allDeps["ioredis"] ||
-      this.containerReport.services.some((s) => s.technology.includes("Valkey") || s.technology.includes("Redis")) ||
-      this.envKeys.has("VALKEY_URL") ||
-      this.envKeys.has("REDIS_URL");
-
-    const nodes: ArchitectureNode[] = [
-      {
-        id: "UserActor",
-        label: "End User / Player",
-        desc: "Interacts with the platform through the responsive web client",
-        type: "person",
-      },
-      {
-        id: "SystemApp",
-        label: `${repoName} Platform`,
-        desc: manifest.description || "Core application ecosystem, room runtime, and real-time gaming services",
-        type: "system",
-      },
-    ];
-
-    const edges: ArchitectureEdge[] = [
-      {
-        from: "UserActor",
-        to: "SystemApp",
-        label: "Interacts via HTTPS REST & WebSockets",
-        technology: "TLS / HTTPS / WSS",
-      },
-    ];
-
-    // External Identity (Discord OAuth2 / Better Auth)
-    if (hasDiscord) {
-      nodes.push({
-        id: "DiscordAuthExt",
-        label: "Discord OAuth2 / Identity Provider",
-        desc: "Authenticates players, synchronizes avatars, and provides profile validation",
-        type: "external",
-      });
-      edges.push({
-        from: "SystemApp",
-        to: "DiscordAuthExt",
-        label: "Exchanges OAuth code & validates tokens",
-        technology: "OAuth 2.0 / HTTPS",
-      });
-    }
-
-    // External SFU (Cloudflare Calls)
-    if (hasCloudflareSfu) {
-      nodes.push({
-        id: "CloudflareSfuExt",
-        label: "Cloudflare Calls SFU",
-        desc: "WebRTC Selective Forwarding Unit for real-time peer media & screen sharing",
-        type: "external",
-      });
-      edges.push({
-        from: "UserActor",
-        to: "CloudflareSfuExt",
-        label: "Streams WebRTC media tracks",
-        technology: "WHEP / WebRTC",
-      });
-      edges.push({
-        from: "SystemApp",
-        to: "CloudflareSfuExt",
-        label: "Provisions sessions & tracks via REST",
-        technology: "HTTPS REST API",
-      });
-    }
-
-    // Object Storage (Cloudflare R2 / AWS S3)
-    if (hasR2OrS3) {
-      nodes.push({
-        id: "ObjectStorageExt",
-        label: "Object Storage (S3 / R2)",
-        desc: "Durable storage for user-uploaded media, screenshots, and game assets",
-        type: "external",
-      });
-      edges.push({
-        from: "SystemApp",
-        to: "ObjectStorageExt",
-        label: "Reads & writes binary objects",
-        technology: "S3 API / HTTPS",
-      });
-    }
-
-    // Anti-Bot / Turnstile
-    if (hasTurnstile) {
-      nodes.push({
-        id: "TurnstileExt",
-        label: "Cloudflare Turnstile",
-        desc: "Protects public registration and bookmark endpoints against bot automation",
-        type: "external",
-      });
-      edges.push({
-        from: "SystemApp",
-        to: "TurnstileExt",
-        label: "Verifies Turnstile challenge tokens",
-        technology: "HTTPS",
-      });
-    }
-
-    // MongoDB Cluster
-    if (hasMongo) {
-      nodes.push({
-        id: "MongoDbExt",
-        label: "MongoDB Cluster",
-        desc: "Persistent document database storing users, matches, wallets, and settings",
-        type: "external",
-      });
-      edges.push({
-        from: "SystemApp",
-        to: "MongoDbExt",
-        label: "Reads & writes models",
-        technology: "MongoDB Wire Protocol",
-      });
-    }
-
-    // Valkey / Redis
-    if (hasValkeyOrRedis) {
-      nodes.push({
-        id: "ValkeyExt",
-        label: "Valkey / Redis Cache & PubSub",
-        desc: "In-memory caching, rate-limiting, room locks, and cross-instance pub/sub",
-        type: "external",
-      });
-      edges.push({
-        from: "SystemApp",
-        to: "ValkeyExt",
-        label: "Caches state & syncs events",
-        technology: "RESP Protocol",
-      });
-    }
-
     return {
       level: 1,
       title: `${repoName} - C4 Level 1: System Context`,
-      nodes,
-      edges,
+      nodes: [{ id: "repository", label: repoName, desc: manifest.description || "Repository root", type: "system" }],
+      edges: [],
     };
   }
 
   private buildLevel2Container(repoName: string, manifest: Record<string, any>): ArchitectureGraph {
-    const allDeps = {
-      ...(manifest.dependencies || {}),
-      ...(manifest.devDependencies || {}),
-    };
-
-    const hasClientPkg = this.workspaceInfo.packages.some((p) => p.type === "application" || p.name.includes("client"));
-    const hasServerPkg = this.workspaceInfo.packages.some((p) => p.type === "service" || p.name.includes("server"));
-    const sharedPkg = this.workspaceInfo.packages.find((p) => p.type === "library" || p.name.includes("shared"));
-
-    const nodes: ArchitectureNode[] = [
-      {
-        id: "UserActor",
-        label: "End User / Player",
-        desc: "Player using web browser or mobile client",
-        type: "person",
-      },
-    ];
-    const edges: ArchitectureEdge[] = [];
-
-    // Client container
-    if (hasClientPkg || allDeps["react"] || allDeps["vue"]) {
-      nodes.push({
-        id: "ClientApp",
-        label: "Web Client SPA",
-        desc: "Responsive Single Page Application providing interactive user lobbies, canvas, and audio/video controls",
-        type: "container",
-        technology: "React 19 / TypeScript / Vite / TailwindCSS",
-      });
-      edges.push({
-        from: "UserActor",
-        to: "ClientApp",
-        label: "Navigates lobbies & plays games",
-        technology: "HTTPS",
-      });
-    }
-
-    // Server container
-    if (hasServerPkg || !hasClientPkg) {
-      nodes.push({
-        id: "ApiGateway",
-        label: "Application & API Server",
-        desc: "Modular server hosting REST endpoints, realtime runtimes, and pluggable event loops",
-        type: "container",
-        technology: "Node.js 22 / Express / Socket.io / Better Auth",
-      });
-
-      if (hasClientPkg || allDeps["react"]) {
-        edges.push({
-          from: "ClientApp",
-          to: "ApiGateway",
-          label: "Sends HTTP REST & Socket.io real-time traffic",
-          technology: "REST / Socket.io (WSS)",
-        });
-      } else {
-        edges.push({
-          from: "UserActor",
-          to: "ApiGateway",
-          label: "Sends HTTP requests & socket messages",
-          technology: "HTTPS / TLS",
-        });
-      }
-    }
-
-    // Shared Kernel container
-    if (sharedPkg) {
-      nodes.push({
-        id: "SharedKernel",
-        label: "Shared Kernel & Contracts",
-        desc: "Isomorphic TypeScript domain models, Zod schemas, socket event interfaces, and constants",
-        type: "container",
-        technology: "TypeScript / Zod / ESM",
-      });
-      if (hasClientPkg) {
-        edges.push({
-          from: "ClientApp",
-          to: "SharedKernel",
-          label: "Imports payload schemas & types",
-          technology: "Monorepo Workspace Dep",
-        });
-      }
-      edges.push({
-        from: "ApiGateway",
-        to: "SharedKernel",
-        label: "Validates incoming contracts & models",
-        technology: "Monorepo Workspace Dep",
-      });
-    }
-
-    // Database container(s) from ContainerInfraAnalyzer
-    const mongoService = this.containerReport.services.find((s) => s.technology.includes("MongoDB"));
-    const valkeyService = this.containerReport.services.find(
-      (s) => s.technology.includes("Valkey") || s.technology.includes("Redis")
+    const nodes: ArchitectureNode[] = this.workspaceInfo.packages.map((pkg) => ({
+      id: `package:${pkg.name}`,
+      label: pkg.name,
+      desc: `Package declared by ${pkg.manifestPath}`,
+      type: "container",
+      technology: pkg.type,
+    }));
+    const packageIds = new Set(nodes.map((node) => node.id));
+    const edges: ArchitectureEdge[] = this.workspaceInfo.packages.flatMap((pkg) =>
+      pkg.internalDependencies
+        .filter((dependency) => packageIds.has(`package:${dependency}`))
+        .map((dependency) => ({ from: `package:${pkg.name}`, to: `package:${dependency}`, label: "declares workspace dependency" })),
     );
-
-    if (mongoService || allDeps["mongoose"] || allDeps["mongodb"]) {
+    for (const service of this.containerReport.services) {
       nodes.push({
-        id: "PrimaryDb",
-        label: "MongoDB Document Store",
-        desc: "Persistent document database storing user accounts, rooms, matches, and audit logs",
-        type: "database",
-        technology: mongoService?.image || "MongoDB 8 (WiredTiger)",
-      });
-      edges.push({
-        from: "ApiGateway",
-        to: "PrimaryDb",
-        label: "Reads & writes models via Mongoose ODM",
-        technology: "MongoDB Wire Protocol",
-      });
-    }
-
-    if (valkeyService || allDeps["redis"] || allDeps["ioredis"]) {
-      nodes.push({
-        id: "CacheCluster",
-        label: "Valkey / Redis In-Memory Cache",
-        desc: "Key-value cache, session locks, and pub/sub message broker",
-        type: "database",
-        technology: valkeyService?.image || "Valkey 8 / Redis",
-      });
-      edges.push({
-        from: "ApiGateway",
-        to: "CacheCluster",
-        label: "Pub/Sub events, caches, and rate-limiting",
-        technology: "RESP Protocol",
+        id: `service:${service.name}`,
+        label: service.name,
+        desc: `Container service declared in ${service.sourceFile}`,
+        type: service.role === "database" ? "database" : "container",
+        technology: service.image || service.technology,
       });
     }
 
@@ -392,9 +184,24 @@ export class ArchitectureAnalyzer {
     };
   }
 
-  private buildLevel3Component(_repoName: string, _manifest: Record<string, any>, maxNodes: number): ArchitectureGraph {
+  private buildLevel3Files(repoName: string, maxNodes: number): ArchitectureGraph {
+    const nodes: ArchitectureNode[] = [];
+    if (!this.hasActiveScan()) return { level: 3, title: `${repoName} — file map`, nodes, edges: [] };
+    if (existsSync(this.dbPath)) {
+      try {
+        const db = new DatabaseSync(this.dbPath, { readOnly: true });
+        const files = db.prepare("SELECT path, language FROM files ORDER BY path LIMIT ?1").all(maxNodes) as Array<{ path: string; language: string }>;
+        for (const file of files) nodes.push({ id: `file_${nodes.length}`, label: file.path, desc: "Inventoried file", type: "component", technology: file.language });
+        db.close();
+      } catch { /* Missing inventory remains empty. */ }
+    }
+    return { level: 3, title: `${repoName} — file map`, nodes, edges: [] };
+  }
+
+  private buildLevel4Code(repoName: string, _manifest: Record<string, any>, maxNodes: number): ArchitectureGraph {
     const nodes: ArchitectureNode[] = [];
     const edges: ArchitectureEdge[] = [];
+    if (!this.hasActiveScan()) return { level: 4, title: `${repoName} - Code Map`, nodes, edges };
 
     // Query symbols and edges from SQLite cache
     if (existsSync(this.dbPath)) {
@@ -417,7 +224,6 @@ export class ArchitectureAnalyzer {
             AND f.path NOT LIKE '%scripts/%'
             AND f.path NOT LIKE '%migrations/%'
             AND f.path NOT LIKE '%backup%'
-            AND (f.path LIKE '%src/%' OR f.path LIKE '%lib/%' OR f.path LIKE '%packages/%' OR f.path LIKE '%crates/%' OR f.path LIKE '%app/%' OR f.path LIKE '%pkg/%' OR f.path LIKE '%internal/%')
           ORDER BY s.cyclomatic_complexity DESC, s.line_end - s.line_start DESC
           LIMIT ?
         `);
@@ -505,52 +311,7 @@ export class ArchitectureAnalyzer {
     }
 
     // High-level architectural fallback components if SQLite has no symbols
-    if (nodes.length === 0) {
-      nodes.push(
-        {
-          id: "RoomManagerComp",
-          label: "Realtime Room Runtime",
-          desc: "Orchestrates multi-user room lifecycles, seats, ready states, and session persistence",
-          type: "component",
-          technology: "TypeScript / Socket.io",
-        },
-        {
-          id: "ModuleRegistryComp",
-          label: "Server Module Registry",
-          desc: "Dynamic plugin registry mounting feature modules, routers, models, and jobs",
-          type: "component",
-          technology: "TypeScript / Core Registry",
-        },
-        {
-          id: "WalletAuthComp",
-          label: "Auth & Transaction Service",
-          desc: "Validates user sessions and processes transactional domain operations",
-          type: "component",
-          technology: "TypeScript / Better Auth / Mongoose",
-        },
-        {
-          id: "MediaSfuComp",
-          label: "Media & SFU Service",
-          desc: "Manages audio/video sessions via SFU providers and user-shared uploads",
-          type: "component",
-          technology: "TypeScript / WebRTC WHEP / R2",
-        },
-        {
-          id: "DomainEnginesComp",
-          label: "Pluggable Domain Engines",
-          desc: "Executes authoritative domain state machines for registered feature modules",
-          type: "component",
-          technology: "TypeScript / State Machines",
-        }
-      );
-
-      edges.push(
-        { from: "RoomManagerComp", to: "DomainEnginesComp", label: "delegates session loop", technology: "In-memory" },
-        { from: "ModuleRegistryComp", to: "RoomManagerComp", label: "registers room specs", technology: "In-memory" },
-        { from: "DomainEnginesComp", to: "WalletAuthComp", label: "executes domain transactions", technology: "Internal Call" },
-        { from: "RoomManagerComp", to: "MediaSfuComp", label: "binds SFU tracks to room", technology: "Internal Call" }
-      );
-    }
+    // Empty evidence stays empty; callers can report that the requested level is unsupported.
 
     // Connect and represent Polymorphic Data Models & Discriminators
     try {
@@ -561,15 +322,17 @@ export class ArchitectureAnalyzer {
       // Add Base Polymorphic models (e.g., Match)
       const baseModelsSeen = new Set<string>();
       for (const disc of discriminators) {
-        const baseName = disc.baseModel || "Match";
-        if (!baseModelsSeen.has(baseName)) {
+        const baseName = disc.baseModel;
+        if (baseName && !baseModelsSeen.has(baseName)) {
           baseModelsSeen.add(baseName);
           const baseId = `model_base_${baseName.toLowerCase()}`;
           if (!nodes.some((n) => n.id === baseId)) {
             nodes.push({
               id: baseId,
               label: `${baseName} (Base Model)`,
-              desc: `Root polymorphic model with discriminatorKey '${disc.discriminatorKey || "moduleId"}'`,
+              desc: disc.discriminatorKey
+                ? `Root polymorphic model using discriminator key '${disc.discriminatorKey}'`
+                : "Root polymorphic model; discriminator key not identified",
               type: "database",
               technology: `${disc.framework} Schema`,
             });
@@ -583,17 +346,21 @@ export class ArchitectureAnalyzer {
             nodes.push({
               id: discId,
               label: disc.modelName,
-              desc: `Discriminator variant on ${disc.baseModel || "Match"} (${disc.collectionOrTable})`,
+              desc: disc.baseModel
+                ? `Discriminator variant on ${disc.baseModel} (${disc.collectionOrTable})`
+                : `Discriminator model (${disc.collectionOrTable}); base model not identified`,
               type: "component",
               technology: `${disc.framework} Discriminator`,
             });
-            const baseId = `model_base_${(disc.baseModel || "Match").toLowerCase()}`;
-            edges.push({
-              from: discId,
-              to: baseId,
-              label: `discriminates (${disc.discriminatorKey || "moduleId"})`,
-              technology: "ODM Inheritance",
-            });
+            if (disc.baseModel) {
+              const baseId = `model_base_${disc.baseModel.toLowerCase()}`;
+              edges.push({
+                from: discId,
+                to: baseId,
+                label: disc.discriminatorKey ? `discriminates (${disc.discriminatorKey})` : "discriminates",
+                technology: "ODM Inheritance",
+              });
+            }
           }
         }
       }
@@ -602,10 +369,23 @@ export class ArchitectureAnalyzer {
     }
 
     return {
-      level: 3,
-      title: `${_repoName} - C4 Level 3: Component Architecture`,
+      level: 4,
+      title: `${repoName} - Code Map`,
       nodes,
       edges,
     };
+  }
+
+  private hasActiveScan(): boolean {
+    if (!existsSync(this.dbPath)) return false;
+    try {
+      const db = new DatabaseSync(this.dbPath, { readOnly: true });
+      try {
+        const table = db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='scan_state'").get();
+        if (!table) return false;
+        const row = db.prepare('SELECT active_scan_id FROM scan_state WHERE singleton=1').get() as { active_scan_id: string | null } | undefined;
+        return Boolean(row?.active_scan_id);
+      } finally { db.close(); }
+    } catch { return false; }
   }
 }

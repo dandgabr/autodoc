@@ -1,0 +1,78 @@
+{
+  "profile": "api",
+  "capabilities": [
+    "javascript-source",
+    "rest-heuristic"
+  ],
+  "symbols": [
+    {
+      "id": "app.js::healthHandler",
+      "kind": "function",
+      "name": "healthHandler",
+      "path": "app.js",
+      "lineStart": 2,
+      "lineEnd": 2,
+      "visibility": "public",
+      "signature": "function healthHandler() { return { ok: true }; }"
+    }
+  ],
+  "inventory": [
+    {
+      "path": "app.js",
+      "category": "source",
+      "support": "ast",
+      "contentSha256": "ab39058332f5ce35bd439a80374bc46584413283ef3d9e1fc374b1bb1837a511"
+    }
+  ],
+  "facts": [],
+  "evidence": [],
+  "relations": [],
+  "endpoints": [
+    {
+      "method": "GET",
+      "path": "/health",
+      "source": "app.js",
+      "state": "partial",
+      "extractor": "heuristic"
+    }
+  ],
+  "coverage": {
+    "scan": {
+      "state": "complete",
+      "diagnostics": []
+    },
+    "symbols": {
+      "state": "complete"
+    },
+    "endpoints": {
+      "state": "partial",
+      "diagnostic": "Endpoint output has no persisted evidence row in the active snapshot."
+    },
+    "facts": {
+      "state": "unsupported",
+      "diagnostic": "Native scan does not emit semantic Fact rows yet.",
+      "diagnosticCode": "FACT_EXTRACTION_UNAVAILABLE"
+    },
+    "evidence": {
+      "state": "partial",
+      "diagnostic": "Native scan emits callsite evidence only.",
+      "diagnosticCode": "CALLSITE_EVIDENCE_ONLY"
+    },
+    "relations": {
+      "state": "partial",
+      "diagnostic": "Native scan emits call relations only.",
+      "diagnosticCode": "CALL_RELATIONS_ONLY"
+    },
+    "schema": {
+      "state": "unsupported",
+      "diagnostic": "Native scan does not emit schema facts yet.",
+      "diagnosticCode": "SCHEMA_FACT_EXTRACTION_UNAVAILABLE"
+    },
+    "diagrams": {
+      "state": "complete",
+      "diagnostic": "Generated Mermaid blocks parse and match the expected per-profile count; visual contrast and clipping are not measured."
+    }
+  },
+  "schemas": [],
+  "diagramCount": 2
+}

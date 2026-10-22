@@ -1,9 +1,9 @@
 pub mod entropy;
-pub mod validators;
 pub mod path_guard;
 pub mod pii_registry;
-pub mod secret_scanner;
 pub mod prompt_guard;
+pub mod secret_scanner;
+pub mod validators;
 
 pub use entropy::{correlation_hash, shannon_entropy};
 pub use path_guard::{sanitize_host_path, validate_and_confine_path};

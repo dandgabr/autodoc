@@ -1,18 +1,27 @@
-import { describe, it, expect, beforeAll } from "vitest";
+import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { AutoDocTools } from "../src/tools/handlers.js";
 import { loadNativeBinding } from "../src/binding.js";
 import { I18nManager } from "../src/i18n/index.js";
 import path from "node:path";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import fs from "node:fs";
 
 describe("AutoDoc MCP Tools Handlers & Schemas", () => {
   let tools: AutoDocTools;
-  const repoRoot = path.resolve(process.cwd(), "../..");
+  let repoRoot: string;
 
   beforeAll(() => {
+    repoRoot = mkdtempSync(path.join(tmpdir(), "autodoc-tools-repo-"));
+    fs.writeFileSync(path.join(repoRoot, "scanner.rs"), "pub fn scan_repository() { helper(); }\nfn helper() {}\n");
+    fs.writeFileSync(path.join(repoRoot, "app.js"), "app.get('/api/health', handler);\nsocket.on('ping', handler);\n");
+    fs.writeFileSync(path.join(repoRoot, "package.json"), JSON.stringify({ name: "fixture", scripts: { test: "vitest" } }));
+    fs.writeFileSync(path.join(repoRoot, "Dockerfile"), "FROM node:22\nCMD [\"node\", \"app.js\"]\n");
     const binding = loadNativeBinding();
     const i18n = new I18nManager("en-US");
     tools = new AutoDocTools(binding, i18n);
   });
+  afterAll(() => rmSync(repoRoot, { recursive: true, force: true }));
 
   it("should have schemas for all registered MCP tools", () => {
     const definitions = tools.getToolDefinitions();
@@ -71,20 +80,22 @@ describe("AutoDoc MCP Tools Handlers & Schemas", () => {
     expect(res.diagram).toContain('workspace');
   });
 
-  it("should execute autodoc_get_symbol_contract with prompt-shielded response", async () => {
+  it("does not fabricate a symbol contract when the legacy cache has no projected signature", async () => {
     const res = await tools.handleGetSymbolContract({
       symbolName: "scan_repository",
-      filePath: "crates/autodoc-core/src/scanner.rs"
+      filePath: "scanner.rs",
+      repoPath: repoRoot,
     });
 
     expect(res).toBeDefined();
     expect(res.symbol).toBe("scan_repository");
-    expect(res.deterministicContract).toBeDefined();
-    expect(res.deterministicContract.securityBoundary).toContain("<untrusted_code_context");
+    expect(res.deterministicContract).toEqual({ raw: null, securityBoundary: null });
   });
 
   it("should execute autodoc_trace_data_flow", async () => {
+    const emptyRepo = mkdtempSync(path.join(tmpdir(), "autodoc-tools-empty-"));
     const res = await tools.handleTraceDataFlow({
+      repoPath: emptyRepo,
       sourceEntrypoint: "handleScanRepository",
       targetSink: "sqlite_edges",
       maxDepth: 5
@@ -92,49 +103,66 @@ describe("AutoDoc MCP Tools Handlers & Schemas", () => {
 
     expect(res).toBeDefined();
     expect(res.source).toBe("handleScanRepository");
-    expect(res.path.length).toBeGreaterThan(0);
+    expect(res.status).toBe("NOT_SCANNED");
+    expect(res.path).toEqual([]);
+    expect(res.taintStatus).toBe("UNKNOWN");
 
     // Test async route ingress flow
     const routeFlow = await tools.handleTraceDataFlow({
+      repoPath: emptyRepo,
       sourceEntrypoint: "/api/users/profile",
       maxDepth: 5
     });
     expect(routeFlow).toBeDefined();
-    expect(routeFlow.path.some((p) => p.kind === "MIDDLEWARE")).toBe(true);
-    expect(routeFlow.path.some((p) => p.kind === "SERVICE_HANDLER")).toBe(true);
-    expect(routeFlow.path.some((p) => p.kind === "PERSISTENCE_ODM_SINK")).toBe(true);
+    expect(routeFlow.path).toEqual([]);
+    expect(routeFlow.sink).toBeNull();
+    expect(routeFlow.taintStatus).toBe("UNKNOWN");
+    rmSync(emptyRepo, { recursive: true, force: true });
   });
 
   it("should execute autodoc_list_api_contracts", async () => {
+    const catalogRepo = mkdtempSync(path.join(tmpdir(), "autodoc-api-fixture-"));
+    fs.writeFileSync(path.join(catalogRepo, "app.js"), "app.get('/api/health', handler);\n");
+    await tools.handleScanRepository({ repoPath: catalogRepo });
     const res = await tools.handleListApiContracts({
-      protocolFilter: "ALL"
+      protocolFilter: "ALL",
+      repoPath: catalogRepo,
     });
 
     expect(res).toBeDefined();
     expect(res.protocolsSupported).toBeDefined();
     expect(res.protocolsSupported.length).toBeGreaterThanOrEqual(7);
     expect(res.contracts.length).toBeGreaterThan(0);
+    rmSync(catalogRepo, { recursive: true, force: true });
   });
 
   it("should execute autodoc_list_socket_contracts", async () => {
+    const catalogRepo = mkdtempSync(path.join(tmpdir(), "autodoc-socket-fixture-"));
+    fs.writeFileSync(path.join(catalogRepo, "app.js"), "socket.on('ping', handler);\n");
+    await tools.handleScanRepository({ repoPath: catalogRepo });
     const res = await tools.handleListSocketContracts({
       directionFilter: "ALL",
-      limit: 50
+      limit: 50,
+      repoPath: catalogRepo,
     });
 
     expect(res).toBeDefined();
     expect(res.protocolsSupported).toContain("SOCKET_IO");
     expect(res.contracts.length).toBeGreaterThan(0);
+    rmSync(catalogRepo, { recursive: true, force: true });
   });
 
   it("should execute autodoc_export_documentation", async () => {
+    const outputDir = mkdtempSync(path.join(tmpdir(), "autodoc-export-test-"));
     const res = await tools.handleExportDocumentation({
-      outputDir: "/tmp/autodoc_test_docs"
+      outputDir,
+      repoPath: repoRoot,
     });
 
     expect(res).toBeDefined();
     expect(res.status).toBe("SUCCESS");
     expect(res.filesGenerated).toBeGreaterThan(0);
+    rmSync(outputDir, { recursive: true, force: true });
   });
 
   it("should execute autodoc_generate_adr", async () => {

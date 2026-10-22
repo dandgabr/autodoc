@@ -1,0 +1,75 @@
+{
+  "profile": "static_site",
+  "capabilities": [
+    "static-site",
+    "javascript-source"
+  ],
+  "symbols": [],
+  "inventory": [
+    {
+      "path": "css/style.css",
+      "category": "style",
+      "support": "heuristic",
+      "contentSha256": "eac0e790573fb6424e6008c9f3a1bdf262add6bb2460a001bb89549fb1ddf482"
+    },
+    {
+      "path": "index.html",
+      "category": "markup",
+      "support": "heuristic",
+      "contentSha256": "009a79a0b3f0bb9596804f12fdb38e3cdc846d131934f8cbd128500222f6b774"
+    },
+    {
+      "path": "js/game.js",
+      "category": "source",
+      "support": "ast",
+      "contentSha256": "670cf3e7f646dd13982e244f0f046002822b1e2c3839ee15d2adf34bc5f0aa22"
+    }
+  ],
+  "facts": [],
+  "evidence": [],
+  "relations": [],
+  "endpoints": [],
+  "unsupportedRelations": [
+    {
+      "kind": "loads-script",
+      "from": "index.html",
+      "to": "js/game.js",
+      "diagnostic": "No persisted semantic Relation or Evidence row exists for markup references."
+    }
+  ],
+  "coverage": {
+    "scan": {
+      "state": "complete",
+      "diagnostics": []
+    },
+    "symbols": {
+      "state": "complete"
+    },
+    "facts": {
+      "state": "unsupported",
+      "diagnostic": "Native scan does not emit semantic Fact rows yet.",
+      "diagnosticCode": "FACT_EXTRACTION_UNAVAILABLE"
+    },
+    "evidence": {
+      "state": "partial",
+      "diagnostic": "Native scan emits callsite evidence only.",
+      "diagnosticCode": "CALLSITE_EVIDENCE_ONLY"
+    },
+    "relations": {
+      "state": "partial",
+      "diagnostic": "Native scan emits call relations only.",
+      "diagnosticCode": "CALL_RELATIONS_ONLY"
+    },
+    "diagrams": {
+      "state": "complete",
+      "diagnostic": "Generated Mermaid blocks parse and match the expected per-profile count; visual contrast and clipping are not measured."
+    },
+    "schema": {
+      "state": "unsupported",
+      "diagnostic": "Native scan does not emit schema facts yet.",
+      "diagnosticCode": "SCHEMA_FACT_EXTRACTION_UNAVAILABLE"
+    }
+  },
+  "diagramCount": 2,
+  "schemas": []
+}

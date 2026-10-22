@@ -1,6 +1,8 @@
 import { readFileSync, readdirSync, statSync } from "node:fs";
-import { join, extname } from "node:path";
+import { join, extname, relative } from "node:path";
 import { isIgnoredDirectory, isTestPath } from "../utils.js";
+import type { SnapshotContext } from "../../analysis/snapshot.js";
+import { readInventoryFiles, readVerifiedSource } from "../../analysis/source-reader.js";
 
 export interface DiscoveredSocketEvent {
   eventName: string;
@@ -15,24 +17,32 @@ export interface DiscoveredSocketEvent {
 
 export interface RealtimeAnalyzerOptions {
   includeTests?: boolean;
+  snapshot?: SnapshotContext;
 }
 
 export class RealtimeAnalyzer {
   private repoPath: string;
   private includeTests: boolean;
+  private snapshot?: SnapshotContext;
 
   constructor(repoPath: string = process.cwd(), options: RealtimeAnalyzerOptions = {}) {
     this.repoPath = repoPath;
     this.includeTests = options.includeTests ?? false;
+    this.snapshot = options.snapshot;
   }
 
-  public discoverSocketContracts(directionFilter: string = "ALL", limit: number = 200, includeTests?: boolean): DiscoveredSocketEvent[] {
+  private readText(filePath: string): string {
+    if (this.snapshot) return readVerifiedSource(this.snapshot, relative(this.snapshot.repositoryRoot, filePath).split("\\").join("/")).toString("utf8");
+    return readFileSync(filePath, "utf-8");
+  }
+
+  public discoverSocketContracts(directionFilter: string = "ALL", limit: number = Number.MAX_SAFE_INTEGER, includeTests?: boolean): DiscoveredSocketEvent[] {
     const events: Map<string, DiscoveredSocketEvent> = new Map();
     const effectiveIncludeTests = includeTests ?? this.includeTests;
     const sourceFiles = this.findSourceFiles(this.repoPath, 0, effectiveIncludeTests);
 
     for (const file of sourceFiles) {
-      const content = readFileSync(file, "utf-8");
+      const content = this.readText(file);
       const relPath = this.toRelative(file);
       const isClientFile = relPath.includes("client") || relPath.includes("frontend") || relPath.includes("ui") || relPath.includes("web");
 
@@ -311,6 +321,11 @@ export class RealtimeAnalyzer {
   }
 
   private findSourceFiles(dir: string, depth: number = 0, includeTests: boolean = this.includeTests): string[] {
+    if (this.snapshot) return readInventoryFiles(this.snapshot)
+      .filter((file) => file.category === "source" && file.contentSha256 && !file.readError && !file.excludedReason)
+      .filter((file) => includeTests || !isTestPath(file.path))
+      .filter((file) => [".ts", ".tsx", ".js", ".jsx", ".py", ".go", ".rs", ".java", ".kt", ".cs"].includes(extname(file.path)))
+      .map((file) => join(this.snapshot!.repositoryRoot, file.path));
     if (depth > 15) return [];
     const files: string[] = [];
     try {

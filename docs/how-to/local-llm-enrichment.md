@@ -2,7 +2,7 @@
 
 AutoDoc can augment its deterministic (regex/AST) analysis with a **local LLM** for richer contract inference, descriptions, diagram refinement and ADR synthesis. The LLM is strictly an enhancement — every tool degrades to deterministic behavior when no model is available.
 
-## Model profiles (≤ 5 GB budget)
+## Model profiles (up to ~5.5 GB model size)
 
 | Profile | Model | Quantization | Total budget | Context | License |
 |---|---|---|---|---|---|
@@ -56,7 +56,6 @@ Automated setup: run `scripts/setup-llm.sh` (Linux/macOS) or `scripts/setup-llm.
 | `AUTODOC_LLM_MODELS_DIR` | Extra directory scanned for weights. |
 | `AUTODOC_LLM_TIMEOUT_MS` | Generation timeout (default 120000). |
 | `AUTODOC_CUDA_ALLOW_UNSUPPORTED_COMPILER` | `1` passes `--allow-unsupported-compiler` to CUDA builds (needed when nvcc < GCC version). |
-| `AUTODOC_BENCHMARK_REPO` | External benchmark monorepo path for the agnostic-analyzer test suite. |
 | `CUDA_PATH` | CUDA toolkit root; its `bin/` is prepended to `PATH` for builds. |
 | `CMAKE_PREFIX_PATH` | Extra CMake package search path (e.g. vendored SPIRV-Headers for Vulkan). |
 
@@ -68,8 +67,7 @@ Every LLM-aware tool accepts `model_profile` (`small|mid|large|auto`) and `llm_e
 - `autodoc_export_openapi` — `llm_enrich: true` adds LLM-written summaries/descriptions (structure remains deterministic).
 - `autodoc_get_c4_diagram` — `llm_enrich: true` refines node descriptions.
 - `autodoc_generate_adr` — `llm_enrich: true` synthesizes Context/Decision/Consequences.
-- `autodoc_list_api_contracts` — `llm_enrich: true` runs two-pass validation: regex pass-1 remains the source of truth; ambiguous candidates (routes without a resolved mount prefix) go to LLM pass-2 and rejected candidates are pruned, with a `candidatesReviewed`/`candidatesRejected` report.
-- `autodoc_list_api_contracts` / analyzers — two-pass hybrid when `llmEnrichment` is enabled in code.
+- `autodoc_list_api_contracts` — `llm_enrich: true` runs two-pass review: regex pass-1 remains the source of truth; ambiguous candidates (routes without a resolved mount prefix) receive advisory annotations. The static candidate set and relationships remain unchanged, and the response reports review outcomes.
 
 ## Guarantees
 

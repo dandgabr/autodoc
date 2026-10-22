@@ -14,12 +14,17 @@ export interface DiagramOptions {
     desc?: string;
     type?: "person" | "system" | "container" | "component" | "external" | "database";
     technology?: string;
+    state?: "inventory" | "confirmed" | "hypothesis";
+    evidenceIds?: string[];
   }>;
   edges?: Array<{
     from: string;
     to: string;
     label?: string;
     technology?: string;
+    id?: string;
+    state?: "confirmed" | "hypothesis";
+    evidenceIds?: string[];
   }>;
 }
 
@@ -39,7 +44,7 @@ export class DiagramRenderer {
   }
 
   static escapeMermaidLabel(text: string): string {
-    return this.escapeHtml(text);
+    return this.escapeHtml(text.replace(/[\r\n]+/g, " "));
   }
 
   static sanitizeMermaidId(id: string): string {
@@ -52,6 +57,13 @@ export class DiagramRenderer {
       return "#blocked";
     }
     return trimmed;
+  }
+
+  private static provenanceDescription(desc: string, state?: string, evidenceIds?: string[], semanticId?: string): string {
+    const metadata = [semanticId ? `ID: ${semanticId}` : "", state ? `State: ${state}` : "", evidenceIds?.length ? `Evidence: ${evidenceIds.join(", ")}` : ""]
+      .filter(Boolean)
+      .join("; ");
+    return [desc, metadata].filter(Boolean).join(" — ");
   }
 
   static render(options: DiagramOptions): string {
@@ -85,7 +97,7 @@ export class DiagramRenderer {
     for (const n of externalNodes) {
       const safeId = this.sanitizeMermaidId(n.id);
       const label = this.escapeMermaidLabel(n.label);
-      const desc = this.escapeMermaidLabel(n.desc || "");
+      const desc = this.escapeMermaidLabel(this.provenanceDescription(n.desc || "", n.state, n.evidenceIds, n.id));
       if (n.type === "person") {
         lines.push(`    Person(${safeId}, "${label}", "${desc}")`);
       } else {
@@ -101,7 +113,7 @@ export class DiagramRenderer {
       for (const n of internalNodes) {
         const safeId = this.sanitizeMermaidId(n.id);
         const label = this.escapeMermaidLabel(n.label);
-        const desc = this.escapeMermaidLabel(n.desc || "");
+        const desc = this.escapeMermaidLabel(this.provenanceDescription(n.desc || "", n.state, n.evidenceIds, n.id));
         const tech = this.escapeMermaidLabel(n.technology || (n.type === "database" ? "SQLite WAL" : "Core Module"));
 
         if (level === 1) {
@@ -127,7 +139,10 @@ export class DiagramRenderer {
     for (const e of edges) {
       const safeFrom = this.sanitizeMermaidId(e.from);
       const safeTo = this.sanitizeMermaidId(e.to);
-      const label = this.escapeMermaidLabel(e.label || "uses");
+      const relationMetadata = [e.id ? `ID: ${e.id}` : "", e.state ? `State: ${e.state}` : "", e.evidenceIds?.length ? `Evidence: ${e.evidenceIds.join(", ")}` : ""]
+        .filter(Boolean)
+        .join("; ");
+      const label = this.escapeMermaidLabel([e.label || "uses", relationMetadata].filter(Boolean).join(" — "));
       const tech = e.technology ? `, "${this.escapeMermaidLabel(e.technology)}"` : "";
       lines.push(`    Rel(${safeFrom}, ${safeTo}, "${label}"${tech})`);
     }
@@ -149,6 +164,8 @@ export class DiagramRenderer {
         desc: n.description,
         type: (n.type as any) || "system",
         technology: n.technology,
+        state: (n as any).state,
+        evidenceIds: (n as any).evidenceIds,
       })),
       edges,
     });
@@ -194,7 +211,7 @@ export class DiagramRenderer {
 
   private static renderStructurizr(options: DiagramOptions): string {
     const title = options.title || "AutoDoc Inspected System";
-    const nodes = (options.nodes || []).map((n) => ({ ...n, description: n.desc }));
+    const nodes = (options.nodes || []).map((n) => ({ ...n, description: this.provenanceDescription(n.desc || "", n.state, n.evidenceIds, n.id) }));
     return this.renderStructurizrDsl(title, nodes, options.edges || []);
   }
 }

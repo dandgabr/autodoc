@@ -57,8 +57,8 @@ The response includes `llmEnriched` (boolean) and, when enrichment was applied, 
 Extracts deterministic AST symbol signatures enclosed in semantic prompt defense boundaries (`<untrusted_code_context>`).
 
 ### Parameters
-| Name | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
+| Name | Type | Required | Default | Description |
+| :--- | :--- | :--- | :--- | :--- |
 | `symbolName` | string | Yes | Fully Qualified Symbol Name (FQSN). |
 | `filePath` | string | No | Relative or absolute path to source file. |
 | `include_body` | boolean | No | When false, skeletonizes body to preserve token budget. |
@@ -67,14 +67,20 @@ Extracts deterministic AST symbol signatures enclosed in semantic prompt defense
 
 ## 4. `autodoc_trace_data_flow`
 
-Traces taint data flows from external entrypoints (sources) through sanitizers to persistence or network sinks.
+Reports call-graph paths only when the current snapshot can support them. A call path does not prove taint propagation, sanitization, or a security property. The response uses `contractVersion: 2`, `taintStatus: "UNKNOWN"`, and explicit states (`NOT_SCANNED`, `SNAPSHOT_UNAVAILABLE`, `UNKNOWN`, `PARTIAL`, `SUCCESS`, or `FAILED`). Missing evidence-backed paths return `UNKNOWN`; they do not prove absence.
+
+Call extraction currently uses Tree-sitter call nodes for TypeScript/JavaScript, Python, Rust, Go, Java, and C. A bare call is confirmed only when it has one matching declaration in the same parsed file and no collected shadowing binding. The parser preserves the call expression, source line and column range, source SHA-256, extraction method, semantic candidate FQSNs, and resolution state. Published relations and callsite evidence use the same generation; repeated calls on one line retain distinct IDs. Overloads remain ambiguous; receiver/member calls and unresolved imports remain candidates until type or import binding is proven. Heuristic fallback does not emit call edges. Callback registration is not treated as callback execution and produces partial coverage with `CALLBACK_BINDING_UNSUPPORTED` when detected. Comments and strings are not call occurrences.
+
+Binding collection is conservative at file scope today, so a shadowing binding can leave an otherwise unrelated call unresolved. Destructuring, parameters, loops, and catch bindings are recognized as shadowing evidence, but full block-by-block lexical scope and callback dispatch are not resolved. Unsupported and ambiguous relations must remain visible as such; they are not confirmed graph edges.
 
 ### Parameters
 | Name | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | `sourceEntrypoint` | string | Yes | Name of entrypoint function or API controller. |
-| `targetSink` | string | No | Destination sink (e.g. database table or external API). |
+| `targetSink` | string | No | Target symbol/FQSN in the call graph. This does not identify a database or data-flow sink. |
 | `maxDepth` | integer | No | Maximum call graph search depth (1-20, default: 5). |
+
+The snake_case alias `max_depth` is accepted. If both forms are supplied, they must match. A missing sink remains `null`; no persistence target is inferred from a name or route.
 
 ---
 
@@ -82,14 +88,17 @@ Traces taint data flows from external entrypoints (sources) through sanitizers t
 
 Inventories inbound and outbound service endpoints spanning 30 years of enterprise protocols.
 
+Regex-discovered routes are heuristic candidates, not evidence-backed API facts. When a page contains them, `coverage.state` is `partial` and `coverage.diagnostics` includes `API_ROUTE_HEURISTIC_NO_EVIDENCE`; the route list remains useful for review but must not be treated as a complete or verified API inventory.
+
 ### Parameters
-| Name | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| `protocolFilter` | string | No | `"ALL"`, `"REST"`, `"SOAP"`, `"GRPC"`, `"GRAPHQL"`, or `"CORBA"`. |
-| `limit` | integer | No | Pagination limit (1-100, default: 50). |
-| `cursor` | string | No | Cursor for paginated traversal. |
-| `include_tests` | boolean | No | `false` | Whether to include test suites and mock files in discovery. |
-| `llm_enrich` | boolean | No | `false` | LLM-aware two-pass validation: ambiguous pass-1 candidates (routes without a resolved mount prefix) go to LLM classification; rejected candidates are pruned and the response includes a `candidatesReviewed`/`candidatesRejected` report. |
+| Name | Type | Required | Default | Description |
+| :--- | :--- | :--- | :--- | :--- |
+| `protocolFilter` | string | No | `ALL` | `ALL`, `REST`, `SOAP`, `GRPC`, `GRAPHQL`, `CORBA`, `WCF`, or `FLATBUFFERS`. |
+| `limit` | integer | No | `50` | Pagination limit (1-100). |
+| `cursor` | string | No | - | Cursor for paginated traversal. |
+| `scan_id` | string | No | - | Pin the request to a retained snapshot generation. |
+| `include_tests` | boolean | No | `false` | Include test suites and mock files in discovery. |
+| `llm_enrich` | boolean | No | `false` | Request advisory annotations for ambiguous static routes; static candidates remain unchanged. |
 | `model_profile` | string | No | `auto` | Model profile for LLM enrichment. |
 
 ---
@@ -122,12 +131,16 @@ Discovers Socket.io events, WebSocket listeners/emitters, typed payload interfac
 | `directionFilter` | string | No | `"ALL"` | Event direction: `"ALL"`, `"CLIENT_TO_SERVER"`, `"SERVER_TO_CLIENT"`, or `"BIDIRECTIONAL"`. |
 | `limit` | integer | No | `50` | Pagination limit (1-100). |
 | `cursor` | string | No | - | Cursor for paginated traversal. |
+| `scan_id` | string | No | - | Pin the request to a retained snapshot generation. |
+| `include_tests` | boolean | No | `false` | Include test suites and mock files in discovery. |
 
 ### Response Schema
 ```json
 {
+  "contractVersion": 2,
   "protocolsSupported": ["SOCKET_IO", "WEBRTC", "WEBSOCKET"],
   "directionFilter": "ALL",
+  "scanId": "scan-id",
   "contracts": [
     {
       "eventName": "webrtc:offer",
@@ -138,15 +151,21 @@ Discovers Socket.io events, WebSocket listeners/emitters, typed payload interfac
       "isTypedContract": true
     }
   ],
-  "total": 1
+  "items": [{ "eventName": "webrtc:offer", "direction": "BIDIRECTIONAL", "payloadType": "RTCSessionDescriptionInit | RTCIceCandidateInit", "sourceFile": "src/realtime.ts", "protocol": "WEBRTC", "isTypedContract": true }],
+  "total": 1,
+  "nextCursor": null,
+  "truncated": false,
+  "coverage": { "state": "partial", "diagnostics": [] }
 }
 ```
+
+Successful catalog responses include `contractVersion`, `scanId`, the current-page aliases `contracts` and `items`, `total`, `nextCursor`, `truncated`, and `coverage`. `scan_id` fixes a request to a retained generation; the cursor also binds subsequent pages to that generation and filter.
 
 ---
 
 ## 8. `autodoc_export_documentation`
 
-Synthesizes living technical documentation structured according to the Diátaxis documentation framework (Tutorials, How-To Guides, Technical Reference, and Architectural Explanation) directly from the SQLite graph and exports it to the filesystem.
+Synthesizes architecture/explanation reports, reference catalogs, and a getting-started tutorial when supported by the detected project, using one selected snapshot, then exports them to the filesystem. How-To guides are not currently generated.
 
 ### Parameters
 | Name | Type | Required | Default | Description |
@@ -157,7 +176,10 @@ Synthesizes living technical documentation structured according to the Diátaxis
 ### Response Schema
 ```json
 {
-  "status": "SUCCESS",
+  "status": "PARTIAL",
+  "scanId": "scan-id",
+  "repositoryRoot": "/path/to/repository",
+  "coverage": { "state": "partial", "diagnostics": [] },
   "targetDirectory": "./docs",
   "filesGenerated": 7,
   "files": [
@@ -166,12 +188,14 @@ Synthesizes living technical documentation structured according to the Diátaxis
     "reference/http-endpoints.md",
     "reference/socket-events.md",
     "reference/data-models.md",
-    "tutorials/getting-started.md",
-    "how-to/add-new-module.md"
+    "architecture/repository-maps.md",
+    "tutorials/getting-started.md"
   ],
   "message": "Diátaxis living documentation successfully synthesized into ./docs"
 }
 ```
+
+Export status is `SUCCESS` for complete coverage and `PARTIAL` when the selected snapshot has incomplete coverage. Snapshot read failures return an explicit failure status with `scanId: null` and diagnostics.
 
 ---
 

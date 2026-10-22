@@ -1,9 +1,9 @@
-use std::collections::HashMap;
-use std::sync::Arc;
 use arc_swap::ArcSwap;
 use lasso::{Spur, ThreadedRodeo};
 use petgraph::graphmap::DiGraphMap;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
+use std::sync::Arc;
 
 #[repr(C)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
@@ -72,8 +72,12 @@ impl GraphEngine {
         let mut scores: Vec<(u32, usize)> = graph
             .nodes()
             .map(|n| {
-                let deg = graph.neighbors_directed(n, petgraph::Direction::Incoming).count()
-                    + graph.neighbors_directed(n, petgraph::Direction::Outgoing).count();
+                let deg = graph
+                    .neighbors_directed(n, petgraph::Direction::Incoming)
+                    .count()
+                    + graph
+                        .neighbors_directed(n, petgraph::Direction::Outgoing)
+                        .count();
                 (n, deg)
             })
             .collect();
@@ -108,7 +112,10 @@ impl GraphEngine {
         let pruned_count = total_nodes.saturating_sub(limit);
         if pruned_count > 0 {
             aggregated_clusters.insert("SatelliteComponents".to_string(), pruned_count);
-            mermaid_lines.push(format!("    subgraph Aux[\"+ {} Auxiliary Components\"]", pruned_count));
+            mermaid_lines.push(format!(
+                "    subgraph Aux[\"+ {} Auxiliary Components\"]",
+                pruned_count
+            ));
             mermaid_lines.push("        AuxNode[\"Aggregated Secondary Components\"]".to_string());
             mermaid_lines.push("    end".to_string());
         }

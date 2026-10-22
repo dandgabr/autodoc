@@ -17,7 +17,11 @@ pub fn validate_cpf(digits_only: &str) -> bool {
     }
 
     // 1st verifier digit
-    let sum1: u32 = digits[0..9].iter().enumerate().map(|(i, &d)| d * (10 - i as u32)).sum();
+    let sum1: u32 = digits[0..9]
+        .iter()
+        .enumerate()
+        .map(|(i, &d)| d * (10 - i as u32))
+        .sum();
     let rem1 = sum1 % 11;
     let d1 = if rem1 < 2 { 0 } else { 11 - rem1 };
     if digits[9] != d1 {
@@ -25,7 +29,11 @@ pub fn validate_cpf(digits_only: &str) -> bool {
     }
 
     // 2nd verifier digit
-    let sum2: u32 = digits[0..10].iter().enumerate().map(|(i, &d)| d * (11 - i as u32)).sum();
+    let sum2: u32 = digits[0..10]
+        .iter()
+        .enumerate()
+        .map(|(i, &d)| d * (11 - i as u32))
+        .sum();
     let rem2 = sum2 % 11;
     let d2 = if rem2 < 2 { 0 } else { 11 - rem2 };
     digits[10] == d2
@@ -47,7 +55,11 @@ pub fn validate_cnpj(digits_only: &str) -> bool {
     }
 
     let weights1 = [5, 4, 3, 2, 9, 8, 7, 6, 5, 4, 3, 2];
-    let sum1: u32 = digits[0..12].iter().zip(weights1.iter()).map(|(&d, &w)| d * w).sum();
+    let sum1: u32 = digits[0..12]
+        .iter()
+        .zip(weights1.iter())
+        .map(|(&d, &w)| d * w)
+        .sum();
     let rem1 = sum1 % 11;
     let d1 = if rem1 < 2 { 0 } else { 11 - rem1 };
     if digits[12] != d1 {
@@ -55,7 +67,11 @@ pub fn validate_cnpj(digits_only: &str) -> bool {
     }
 
     let weights2 = [6, 5, 4, 3, 2, 9, 8, 7, 6, 5, 4, 3, 2];
-    let sum2: u32 = digits[0..13].iter().zip(weights2.iter()).map(|(&d, &w)| d * w).sum();
+    let sum2: u32 = digits[0..13]
+        .iter()
+        .zip(weights2.iter())
+        .map(|(&d, &w)| d * w)
+        .sum();
     let rem2 = sum2 % 11;
     let d2 = if rem2 < 2 { 0 } else { 11 - rem2 };
     digits[13] == d2
@@ -117,7 +133,11 @@ pub fn validate_cns(digits_only: &str) -> bool {
         if digits.len() != 15 {
             return false;
         }
-        let sum: u32 = digits[0..11].iter().enumerate().map(|(i, &d)| d * (15 - i as u32)).sum();
+        let sum: u32 = digits[0..11]
+            .iter()
+            .enumerate()
+            .map(|(i, &d)| d * (15 - i as u32))
+            .sum();
         let rem = sum % 11;
         let mut dv = if rem == 0 { 0 } else { 11 - rem };
         if dv == 10 {
@@ -131,7 +151,11 @@ pub fn validate_cns(digits_only: &str) -> bool {
         if digits.len() != 15 {
             return false;
         }
-        let sum: u32 = digits.iter().enumerate().map(|(i, &d)| d * (15 - i as u32)).sum();
+        let sum: u32 = digits
+            .iter()
+            .enumerate()
+            .map(|(i, &d)| d * (15 - i as u32))
+            .sum();
         sum.is_multiple_of(11)
     } else {
         false

@@ -4,6 +4,7 @@ import {
   CallToolRequestSchema,
   ListToolsRequestSchema,
   ListResourcesRequestSchema,
+  ListResourceTemplatesRequestSchema,
   ReadResourceRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
 import { Logger } from "./logger.js";
@@ -30,6 +31,9 @@ import {
   handlePurgeCache,
   LlmStatusSchema,
   handleLlmStatus,
+  ARCHITECTURE_MAP_RESOURCES,
+  ARCHITECTURE_MAP_RESOURCE_TEMPLATES,
+  handleReadMapResource,
 } from "./tools/handlers.js";
 import { loadNativeBinding } from "./binding.js";
 export { WorkspaceAnalyzer } from "./analyzers/workspace.js";
@@ -60,6 +64,10 @@ export function createServer(): Server {
             type: "object",
             properties: {
               repository_path: { type: "string", description: "Absolute path to the repository root." },
+              maxSourceBytes: { type: "integer", minimum: 1, maximum: 4194304, description: "Per-source byte limit (default 4194304)." },
+              workers: { type: "integer", minimum: 1, maximum: 4, description: "Bounded scan workers (default 4)." },
+              queueCapacity: { type: "integer", minimum: 1, maximum: 16, description: "Maximum queued files (default 16)." },
+              batchSize: { type: "integer", minimum: 1, maximum: 256, description: "Persistence batch size (default 256)." },
             },
           },
         },
@@ -73,6 +81,7 @@ export function createServer(): Server {
               level: { type: "number", description: "C4 model level (1: Context, 2: Container, 3: Component, 4: Code). Default: 2." },
               max_nodes: { type: "number", description: "Maximum visible nodes to prevent LLM context exhaustion (10-100). Default: 35." },
               format: { type: "string", enum: ["mermaid", "structurizr"], description: "Output diagram format. Default: mermaid." },
+              scan_id: { type: "string", description: "Optional retained snapshot generation to query." },
               locale: { type: "string", description: "BCP 47 localization tag (e.g. en-US, pt-BR, es-ES). Default: en-US." },
             },
           },
@@ -92,12 +101,13 @@ export function createServer(): Server {
         },
         {
           name: "autodoc_trace_data_flow",
-          description: "Traces taint data flow paths from external sources through sanitizers to persistence/API sinks.",
+          description: "Reports verified call-graph paths. This tool does not prove taint propagation or sanitization.",
           inputSchema: {
             type: "object",
             properties: {
               repository_path: { type: "string", description: "Target repository path (optional, defaults to last scanned path or cwd)." },
               entrypoint_symbol: { type: "string", description: "Source entrypoint symbol." },
+              target_sink: { type: "string", description: "Optional destination symbol to search for." },
               max_depth: { type: "number", description: "Maximum traversal depth in call graph." },
             },
             required: ["entrypoint_symbol"],
@@ -105,27 +115,30 @@ export function createServer(): Server {
         },
         {
           name: "autodoc_list_api_contracts",
-          description: "Inventories inbound and outbound service endpoints spanning 30 years of enterprise protocols (CORBA, SOAP, REST, gRPC).",
+          description: "Lists verified API contracts from one immutable scan generation. Pages are ordered, report the filtered total and coverage, and cursors bind to repository, scan, collection, and filters.",
           inputSchema: {
             type: "object",
             properties: {
               repository_path: { type: "string", description: "Target repository path (optional, defaults to last scanned path or cwd)." },
               protocol_filter: { type: "string", enum: ["ALL", "REST", "SOAP", "GRPC", "GRAPHQL", "CORBA"] },
               limit: { type: "number", description: "Pagination limit. Default: 50." },
-              cursor: { type: "string", description: "Next page cursor." },
+              cursor: { type: "string", description: "Next page cursor bound to the current repository, scan, catalog, and filters." },
+              scan_id: { type: "string", description: "Optional retained scan generation to query." },
               include_tests: { type: "boolean", description: "Whether to include test suites and mock files (default: false)." },
             },
           },
         },
         {
           name: "autodoc_list_socket_contracts",
-          description: "Inventories realtime event contracts (Socket.io typed contracts, rooms, acknowledgements) and WebRTC signaling channels.",
+          description: "Lists verified realtime contracts from one immutable scan generation. Pages are ordered, report the filtered total and coverage, and cursors bind to repository, scan, collection, and filters.",
           inputSchema: {
             type: "object",
             properties: {
               repository_path: { type: "string", description: "Target repository path (optional, defaults to last scanned path or cwd)." },
               direction_filter: { type: "string", enum: ["ALL", "CLIENT_TO_SERVER", "SERVER_TO_CLIENT", "BIDIRECTIONAL"] },
               limit: { type: "number", description: "Pagination limit. Default: 50." },
+              cursor: { type: "string", description: "Next page cursor bound to the current repository, scan, catalog, and filters." },
+              scan_id: { type: "string", description: "Optional retained scan generation to query." },
               include_tests: { type: "boolean", description: "Whether to include test suites and mock files (default: false)." },
             },
           },
@@ -228,37 +241,16 @@ export function createServer(): Server {
 
   // Virtual Resources handler
   server.setRequestHandler(ListResourcesRequestSchema, async () => {
-    return {
-      resources: [
-        { uri: "code://c4/2", name: "C4 Container Diagram", mimeType: "text/vnd.mermaid" },
-        { uri: "code://graph/callgraph", name: "Canonical Call Graph", mimeType: "application/json" },
-      ],
-    };
+    return { resources: [...ARCHITECTURE_MAP_RESOURCES] };
+  });
+
+  server.setRequestHandler(ListResourceTemplatesRequestSchema, async () => {
+    return { resourceTemplates: [...ARCHITECTURE_MAP_RESOURCE_TEMPLATES] };
   });
 
   server.setRequestHandler(ReadResourceRequestSchema, async (request) => {
     const { uri } = request.params;
-    if (uri.startsWith("code://c4/")) {
-      return {
-        contents: [
-          {
-            uri,
-            mimeType: "text/vnd.mermaid",
-            text: "graph TD\n    App[\"Core App\"] --> DB[\"Database\"]",
-          },
-        ],
-      };
-    }
-
-    return {
-      contents: [
-        {
-          uri,
-          mimeType: "application/json",
-          text: JSON.stringify({ graph: "empty" }),
-        },
-      ],
-    };
+    return handleReadMapResource(uri);
   });
 
   return server;

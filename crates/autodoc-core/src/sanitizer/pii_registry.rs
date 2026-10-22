@@ -1,7 +1,7 @@
-use regex::Regex;
-use serde::{Deserialize, Serialize};
 use crate::sanitizer::entropy::correlation_hash;
 use crate::sanitizer::validators::*;
+use regex::Regex;
+use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum PiiCategory {
@@ -156,26 +156,29 @@ impl PiiRegistry {
         let mut output = input.to_string();
 
         for rule in &self.rules {
-            output = rule.pattern.replace_all(&output, |caps: &regex::Captures| {
-                let matched = caps.get(0).map(|m| m.as_str()).unwrap_or("");
-                let digits: String = matched.chars().filter(|c| c.is_ascii_digit()).collect();
+            output = rule
+                .pattern
+                .replace_all(&output, |caps: &regex::Captures| {
+                    let matched = caps.get(0).map(|m| m.as_str()).unwrap_or("");
+                    let digits: String = matched.chars().filter(|c| c.is_ascii_digit()).collect();
 
-                let is_valid = match rule.checksum {
-                    ChecksumKind::None => true,
-                    ChecksumKind::Cpf => validate_cpf(&digits),
-                    ChecksumKind::Cnpj => validate_cnpj(&digits),
-                    ChecksumKind::Ssn => validate_ssn(matched),
-                    ChecksumKind::Luhn => validate_luhn(&digits),
-                    ChecksumKind::Cns => validate_cns(&digits),
-                };
+                    let is_valid = match rule.checksum {
+                        ChecksumKind::None => true,
+                        ChecksumKind::Cpf => validate_cpf(&digits),
+                        ChecksumKind::Cnpj => validate_cnpj(&digits),
+                        ChecksumKind::Ssn => validate_ssn(matched),
+                        ChecksumKind::Luhn => validate_luhn(&digits),
+                        ChecksumKind::Cns => validate_cns(&digits),
+                    };
 
-                if is_valid {
-                    let hash = correlation_hash(matched);
-                    format!("[REDACTED_{}:{}]", rule.label, hash)
-                } else {
-                    matched.to_string()
-                }
-            }).to_string();
+                    if is_valid {
+                        let hash = correlation_hash(matched);
+                        format!("[REDACTED_{}:{}]", rule.label, hash)
+                    } else {
+                        matched.to_string()
+                    }
+                })
+                .to_string();
         }
 
         output

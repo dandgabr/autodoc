@@ -1,0 +1,65 @@
+{
+  "profile": "cli",
+  "capabilities": [
+    "python-source"
+  ],
+  "symbols": [
+    {
+      "id": "main.py::run",
+      "kind": "function",
+      "name": "run",
+      "path": "main.py",
+      "lineStart": 1,
+      "lineEnd": 2,
+      "visibility": "public",
+      "signature": "def run():"
+    }
+  ],
+  "inventory": [
+    {
+      "path": "main.py",
+      "category": "source",
+      "support": "ast",
+      "contentSha256": "e74fb63bbc78557d50416c4d66b37071b3b6d2ed2d1c22b84f08df8502c4d1a0"
+    }
+  ],
+  "facts": [],
+  "evidence": [],
+  "relations": [],
+  "endpoints": [],
+  "coverage": {
+    "scan": {
+      "state": "complete",
+      "diagnostics": []
+    },
+    "symbols": {
+      "state": "complete"
+    },
+    "facts": {
+      "state": "unsupported",
+      "diagnostic": "Native scan does not emit semantic Fact rows yet.",
+      "diagnosticCode": "FACT_EXTRACTION_UNAVAILABLE"
+    },
+    "evidence": {
+      "state": "partial",
+      "diagnostic": "Native scan emits callsite evidence only.",
+      "diagnosticCode": "CALLSITE_EVIDENCE_ONLY"
+    },
+    "relations": {
+      "state": "partial",
+      "diagnostic": "Native scan emits call relations only.",
+      "diagnosticCode": "CALL_RELATIONS_ONLY"
+    },
+    "schema": {
+      "state": "unsupported",
+      "diagnostic": "Native scan does not emit schema facts yet.",
+      "diagnosticCode": "SCHEMA_FACT_EXTRACTION_UNAVAILABLE"
+    },
+    "diagrams": {
+      "state": "complete",
+      "diagnostic": "Generated Mermaid blocks parse and match the expected per-profile count; visual contrast and clipping are not measured."
+    }
+  },
+  "schemas": [],
+  "diagramCount": 2
+}

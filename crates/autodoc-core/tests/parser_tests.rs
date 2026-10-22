@@ -8,6 +8,9 @@ use std::sync::Arc;
 #[test]
 fn test_typescript_ast_parsing() {
     let code = r#"
+    function helper() {}
+    function invokeHelper() { helper(); }
+
     export interface GameSession {
         id: string;
         players: number;

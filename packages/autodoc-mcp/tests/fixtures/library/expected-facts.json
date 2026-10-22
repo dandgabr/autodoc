@@ -1,0 +1,99 @@
+{
+  "profile": "library",
+  "capabilities": [
+    "typescript-source"
+  ],
+  "symbols": [
+    {
+      "id": "index.ts::add",
+      "kind": "function",
+      "name": "add",
+      "path": "index.ts",
+      "lineStart": 1,
+      "lineEnd": 1,
+      "visibility": "public",
+      "signature": "function add(left: number, right: number): number { return left + right; }"
+    },
+    {
+      "id": "index.ts::calculate",
+      "kind": "function",
+      "name": "calculate",
+      "path": "index.ts",
+      "lineStart": 2,
+      "lineEnd": 2,
+      "visibility": "public",
+      "signature": "function calculate() { return add(1, 2); }"
+    }
+  ],
+  "inventory": [
+    {
+      "path": "index.ts",
+      "category": "source",
+      "support": "ast",
+      "contentSha256": "fa1bc58a0b0142adbcd5e512ffedccf95a69bf85df0ba0e00654ddc0f944c521"
+    }
+  ],
+  "facts": [],
+  "evidence": [
+    {
+      "id": "85edcd4764f82012fd34d505ebd0d8c1984b5002c959ce14195c0c653a38eef3",
+      "path": "index.ts",
+      "contentSha256": "fa1bc58a0b0142adbcd5e512ffedccf95a69bf85df0ba0e00654ddc0f944c521",
+      "lineStart": 2,
+      "lineEnd": 2,
+      "extractor": "callsite",
+      "method": "tree_sitter_ast"
+    }
+  ],
+  "relations": [
+    {
+      "id": "85edcd4764f82012fd34d505ebd0d8c1984b5002c959ce14195c0c653a38eef3",
+      "fromId": "index.ts::calculate",
+      "toId": "index.ts::add",
+      "kind": "call",
+      "resolution": "resolved",
+      "candidateIds": [
+        "index.ts::add"
+      ],
+      "evidenceIds": [
+        "85edcd4764f82012fd34d505ebd0d8c1984b5002c959ce14195c0c653a38eef3"
+      ]
+    }
+  ],
+  "endpoints": [],
+  "coverage": {
+    "scan": {
+      "state": "complete",
+      "diagnostics": []
+    },
+    "symbols": {
+      "state": "complete"
+    },
+    "facts": {
+      "state": "unsupported",
+      "diagnostic": "Native scan does not emit semantic Fact rows yet.",
+      "diagnosticCode": "FACT_EXTRACTION_UNAVAILABLE"
+    },
+    "evidence": {
+      "state": "partial",
+      "diagnostic": "Native scan emits callsite evidence only.",
+      "diagnosticCode": "CALLSITE_EVIDENCE_ONLY"
+    },
+    "relations": {
+      "state": "partial",
+      "diagnostic": "Native scan emits call relations only.",
+      "diagnosticCode": "CALL_RELATIONS_ONLY"
+    },
+    "schema": {
+      "state": "unsupported",
+      "diagnostic": "Native scan does not emit schema facts yet.",
+      "diagnosticCode": "SCHEMA_FACT_EXTRACTION_UNAVAILABLE"
+    },
+    "diagrams": {
+      "state": "complete",
+      "diagnostic": "Generated Mermaid blocks parse and match the expected per-profile count; visual contrast and clipping are not measured."
+    }
+  },
+  "schemas": [],
+  "diagramCount": 2
+}
