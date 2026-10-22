@@ -5,16 +5,16 @@
 ## Status: Accepted (Pinned)
 
 ## Context
-AutoDoc relied exclusively on regex/AST heuristics. The operator wanted a local LLM (≤5 GB VRAM/RAM) integrated across all functions (detection, OpenAPI contracts, C4 diagrams, ADRs, documentation) without depending only on regex.
+AutoDoc relied exclusively on regex/AST heuristics. The operator wanted a local LLM (up to ~5.5 GB total memory for the largest profile) integrated across supported enrichment functions without depending only on regex.
 
 ## Decision
 1. **Three model profiles** (all Q4_K_M GGUF): `small` = Qwen2.5-Coder-3B (~3 GB, default), `mid` = gemma-3-4b-it (~4 GB, 128k context), `large` = Qwen2.5-Coder-7B (~5.5 GB). Selection: operator override (env `AUTODOC_LLM_MODEL`/`AUTODOC_LLM_PROFILE` or per-call `model_profile`) > auto-selection (largest profile fitting min(free VRAM, free RAM) with 15% safety margin) > deterministic fallback.
 2. **Hardware detection** (`llm/hardware.ts`): `nvidia-smi`/`rocm-smi` VRAM probe + `os.freemem`; classifies host and picks profile.
 3. **Providers** (`llm/factory.ts`): node-llama-cpp in-process (lazy optional import, never hard dep) and llama.cpp `llama-server` HTTP (OpenAI-compatible, via `AUTODOC_LLM_SERVER_URL`).
 4. **Structured output** (`llm/structured.ts`): `generateJson` — JSON-shape system prompt, parse + Zod validation, 1 repair retry with error feedback; unparseable results never accepted.
-5. **Two-pass hybrid detection** (`analyzers/llm-candidate-filter.ts`): pass-1 regex remains source of truth; only ambiguous candidates (e.g. routes without resolved mount prefix) go to pass-2 LLM validation; LLM failure keeps pass-1 results (`llmEnriched: false`).
+5. **Two-pass advisory review** (`analyzers/llm-candidate-filter.ts`): pass-1 static results remain the source of truth; ambiguous candidates (e.g. routes without resolved mount prefix) receive pass-2 LLM annotations. Verdicts do not remove routes or relations; provider failure leaves static results unchanged (`llmEnriched: false`).
 6. **Anti-hallucination**: OpenAPI structure stays deterministic; LLM only writes summaries/descriptions/refinements validated against static evidence.
-7. **New tool `autodoc_llm_status`** (11th tool): hardware, auto-profile, active model, per-profile local weights and availability. Tools accepting `model_profile`/`llm_enrich`: export_openapi, get_c4_diagram, generate_adr, list_api_contracts (two-pass pruning), llm_status.
+7. **New tool `autodoc_llm_status`** (11th tool): hardware, auto-profile, active model, per-profile local weights and availability. Tools accepting `model_profile`/`llm_enrich`: export_openapi, get_c4_diagram, generate_adr, list_api_contracts (advisory annotations), llm_status.
 8. Docs at `docs/how-to/local-llm-enrichment.md`.
 
 ## Consequences

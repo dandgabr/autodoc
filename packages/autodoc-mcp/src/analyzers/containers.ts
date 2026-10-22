@@ -1,5 +1,7 @@
 import { existsSync, readFileSync, readdirSync } from "node:fs";
-import { join, basename, extname } from "node:path";
+import { join, basename, extname, relative } from "node:path";
+import type { SnapshotContext } from "../analysis/snapshot.js";
+import { readInventoryFiles, readVerifiedSource, StaleSourceError, type NativeVerifiedReader } from "../analysis/source-reader.js";
 
 export type ContainerRuntimePattern =
   | "docker-compose"
@@ -35,9 +37,38 @@ export interface ContainerInfraReport {
 
 export class ContainerInfraAnalyzer {
   private repoPath: string;
+  private snapshot?: SnapshotContext;
+  private nativeReader?: NativeVerifiedReader;
 
-  constructor(repoPath: string = process.cwd()) {
+  constructor(repoPath: string = process.cwd(), snapshot?: SnapshotContext, nativeReader?: NativeVerifiedReader) {
     this.repoPath = repoPath;
+    this.snapshot = snapshot;
+    this.nativeReader = nativeReader;
+  }
+
+  private readText(filePath: string): string {
+    if (this.snapshot) return readVerifiedSource(this.snapshot, relative(this.snapshot.repositoryRoot, filePath).split("\\").join("/"), this.nativeReader).toString("utf8");
+    return readFileSync(filePath, "utf-8");
+  }
+
+  private exists(filePath: string): boolean {
+    if (!this.snapshot) return existsSync(filePath);
+    const relPath = relative(this.snapshot.repositoryRoot, filePath).split("\\").join("/");
+    const prefix = relPath === "" ? "" : `${relPath}/`;
+    return readInventoryFiles(this.snapshot).some((file) => (file.path === relPath || file.path.startsWith(prefix)) && !file.excludedReason);
+  }
+
+  private readDirectory(dirPath: string): string[] {
+    if (!this.snapshot) return readdirSync(dirPath);
+    const relDir = relative(this.snapshot.repositoryRoot, dirPath).split("\\").join("/").replace(/^\.\/$/, "").replace(/^\.$/, "");
+    const prefix = relDir ? `${relDir}/` : "";
+    const entries = new Set<string>();
+    for (const file of readInventoryFiles(this.snapshot)) {
+      if (!file.path.startsWith(prefix)) continue;
+      const tail = file.path.slice(prefix.length);
+      if (tail) entries.add(tail.split("/")[0]);
+    }
+    return [...entries].sort();
   }
 
   public analyze(): ContainerInfraReport {
@@ -99,12 +130,13 @@ export class ContainerInfraAnalyzer {
 
     for (const { file, pattern } of candidates) {
       const fullPath = join(this.repoPath, file);
-      if (existsSync(fullPath)) {
+      if (this.exists(fullPath)) {
         patterns.add(pattern);
         try {
-          const content = readFileSync(fullPath, "utf-8");
+          const content = this.readText(fullPath);
           this.parseComposeYaml(content, file, pattern, services);
-        } catch {
+        } catch (error) {
+          if (error instanceof StaleSourceError) throw error;
           // Ignore parse errors
         }
       }
@@ -175,14 +207,14 @@ export class ContainerInfraAnalyzer {
     const quadletDirs = [this.repoPath, join(this.repoPath, "quadlets"), join(this.repoPath, "systemd"), join(this.repoPath, "containers")];
 
     for (const dir of quadletDirs) {
-      if (!existsSync(dir)) continue;
+      if (!this.exists(dir)) continue;
       try {
-        const files = readdirSync(dir);
+        const files = this.readDirectory(dir);
         for (const file of files) {
           if (file.endsWith(".container") || file.endsWith(".kube") || file.endsWith(".pod")) {
             patterns.add("podman-quadlet");
             const fullPath = join(dir, file);
-            const content = readFileSync(fullPath, "utf-8");
+            const content = this.readText(fullPath);
             const svcName = basename(file, extname(file));
 
             const imageMatch = /^Image=(.*)$/m.exec(content);
@@ -202,7 +234,8 @@ export class ContainerInfraAnalyzer {
             );
           }
         }
-      } catch {
+      } catch (error) {
+        if (error instanceof StaleSourceError) throw error;
         // Fallback
       }
     }
@@ -212,13 +245,13 @@ export class ContainerInfraAnalyzer {
     const k8sDirs = [join(this.repoPath, "k8s"), join(this.repoPath, "kubernetes"), join(this.repoPath, "deploy"), join(this.repoPath, "manifests")];
 
     for (const dir of k8sDirs) {
-      if (!existsSync(dir)) continue;
+      if (!this.exists(dir)) continue;
       try {
-        const files = readdirSync(dir);
+        const files = this.readDirectory(dir);
         for (const file of files) {
           if (file.endsWith(".yaml") || file.endsWith(".yml")) {
             const fullPath = join(dir, file);
-            const content = readFileSync(fullPath, "utf-8");
+            const content = this.readText(fullPath);
             if (content.includes("apiVersion:") && (content.includes("kind: Deployment") || content.includes("kind: StatefulSet") || content.includes("kind: Pod"))) {
               patterns.add("kubernetes");
               const nameMatch = /name:\s*([a-zA-Z0-9_-]+)/.exec(content);
@@ -240,7 +273,8 @@ export class ContainerInfraAnalyzer {
             }
           }
         }
-      } catch {
+      } catch (error) {
+        if (error instanceof StaleSourceError) throw error;
         // Fallback
       }
     }
@@ -250,14 +284,14 @@ export class ContainerInfraAnalyzer {
     const chartDirs = [join(this.repoPath, "charts"), join(this.repoPath, "helm")];
 
     for (const dir of chartDirs) {
-      if (!existsSync(dir)) continue;
+      if (!this.exists(dir)) continue;
       try {
-        const files = readdirSync(dir);
+        const files = this.readDirectory(dir);
         for (const file of files) {
           const chartPath = join(dir, file, "Chart.yaml");
-          if (existsSync(chartPath)) {
+          if (this.exists(chartPath)) {
             patterns.add("helm");
-            const content = readFileSync(chartPath, "utf-8");
+            const content = this.readText(chartPath);
             const nameMatch = /^name:\s*(.+)$/m.exec(content);
             const chartName = nameMatch ? nameMatch[1].trim() : file;
 
@@ -272,7 +306,8 @@ export class ContainerInfraAnalyzer {
             });
           }
         }
-      } catch {
+      } catch (error) {
+        if (error instanceof StaleSourceError) throw error;
         // Fallback
       }
     }
@@ -280,11 +315,11 @@ export class ContainerInfraAnalyzer {
 
   private discoverNomadJobs(services: DiscoveredContainerService[], patterns: Set<ContainerRuntimePattern>) {
     try {
-      const files = readdirSync(this.repoPath);
+      const files = this.readDirectory(this.repoPath);
       for (const file of files) {
         if (file.endsWith(".nomad") || file.endsWith(".nomad.hcl")) {
           patterns.add("nomad");
-          const content = readFileSync(join(this.repoPath, file), "utf-8");
+          const content = this.readText(join(this.repoPath, file));
           const jobMatch = /job\s+["']([^"']+)["']/.exec(content);
           const imageMatch = /image\s*=\s*["']([^"']+)["']/.exec(content);
 
@@ -302,17 +337,18 @@ export class ContainerInfraAnalyzer {
           );
         }
       }
-    } catch {
+    } catch (error) {
+      if (error instanceof StaleSourceError) throw error;
       // Fallback
     }
   }
 
   private discoverDevcontainers(services: DiscoveredContainerService[], patterns: Set<ContainerRuntimePattern>) {
     const devcontainerPath = join(this.repoPath, ".devcontainer", "devcontainer.json");
-    if (existsSync(devcontainerPath)) {
+    if (this.exists(devcontainerPath)) {
       patterns.add("devcontainer");
       try {
-        const content = readFileSync(devcontainerPath, "utf-8");
+        const content = this.readText(devcontainerPath);
         const json = JSON.parse(content);
         services.push({
           name: json.name || "devcontainer",
@@ -324,17 +360,18 @@ export class ContainerInfraAnalyzer {
           sourceFile: ".devcontainer/devcontainer.json",
           environmentVariables: [],
         });
-      } catch {
+      } catch (error) {
+        if (error instanceof StaleSourceError) throw error;
         // Fallback
       }
     }
   }
 
   private discoverStandaloneContainerfiles(_services: DiscoveredContainerService[], patterns: Set<ContainerRuntimePattern>) {
-    if (existsSync(join(this.repoPath, "Dockerfile"))) {
+    if (this.exists(join(this.repoPath, "Dockerfile"))) {
       patterns.add("dockerfile");
     }
-    if (existsSync(join(this.repoPath, "Containerfile"))) {
+    if (this.exists(join(this.repoPath, "Containerfile"))) {
       patterns.add("containerfile");
     }
   }

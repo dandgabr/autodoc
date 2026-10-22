@@ -39,11 +39,10 @@ export async function createLlmProvider(
     envProfile: process.env.AUTODOC_LLM_PROFILE,
   });
   if ("error" in resolved) return null;
-  return resolved.weightsPath === undefined && config.adapter !== "llama-server"
-    ? null
-    : config.adapter === "llama-server" || process.env.AUTODOC_LLM_SERVER_URL
-      ? await createLlamaServerProvider(resolved, config)
-      : await createNodeLlamaProvider(resolved, config);
+  if (config.adapter === "llama-server" || process.env.AUTODOC_LLM_SERVER_URL) {
+    return await createLlamaServerProvider(resolved, config);
+  }
+  return resolved.weightsPath === undefined ? null : await createNodeLlamaProvider(resolved, config);
 }
 
 async function createNodeLlamaProvider(resolved: ResolvedModel, config: LlmConfig): Promise<LlmProvider | null> {
@@ -73,13 +72,25 @@ async function createNodeLlamaProvider(resolved: ResolvedModel, config: LlmConfi
       process.env.NODE_LLAMA_CPP_CMAKE_OPTION_CMAKE_CUDA_FLAGS = "--allow-unsupported-compiler";
     }
 
-    const llama = await getLlama({
-      gpu: "auto",
-      build: "auto",
-    });
-    const contextTokens = config.contextTokens ?? Math.min(resolved.spec.contextTokens, 16384);
+    // Prefer the last local build (e.g. CUDA) when present: the default
+    // {gpu:'auto', build:'auto'} path probes prebuilt CUDA binaries, falls
+    // back to Vulkan, and can trigger an unnecessary recompile.
+    const llama = await getLlama("lastBuild").catch(() =>
+      getLlama({
+        gpu: "auto",
+        build: "auto",
+      })
+    );
+    // 16384 does not fit alongside 7B q4_k_m weights on ~6 GB VRAM GPUs;
+    // degrade to 8192 before failing the whole provider.
+    const contextTokens = config.contextTokens ?? Math.min(resolved.spec.contextTokens, 8192);
     const model = await llama.loadModel({ modelPath: resolved.weightsPath });
-    const context = await model.createContext({ contextSize: contextTokens });
+    let context;
+    try {
+      context = await model.createContext({ contextSize: contextTokens });
+    } catch {
+      context = await model.createContext({ contextSize: Math.min(contextTokens, 4096) });
+    }
     const session = new LlamaChatSession({ contextSequence: context.getSequence() });
 
     return {

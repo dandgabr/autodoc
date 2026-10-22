@@ -40,7 +40,7 @@ This catalog documents every function, method, struct, and class across the `@au
 | `CallGraph::add_node` | `pub fn` | `(&mut self, node: CompactNode) -> NodeIndex` | Inserts a 20-byte POD node into the graph. |
 | `CallGraph::add_edge` | `pub fn` | `(&mut self, from: NodeIndex, to: NodeIndex, weight: f32) -> EdgeIndex` | Connects two symbol nodes with a directed call edge. |
 | `CallGraph::prune_by_pagerank`| `pub fn` | `(&self, max_nodes: usize) -> CallGraph` | Calculates PageRank centrality scores and keeps top $N$ nodes. |
-| `CallGraph::find_path` | `pub fn` | `(&self, start: NodeIndex, target: NodeIndex) -> Option<Vec<NodeIndex>>` | Breadth-first search for data flow taint pathfinding. |
+| `CallGraph::find_path` | `pub fn` | `(&self, start: NodeIndex, target: NodeIndex) -> Option<Vec<NodeIndex>>` | Breadth-first search for a path through call graph nodes; it does not establish data flow or taint propagation. |
 | `CallGraph::export_json` | `pub fn` | `(&self) -> String` | Serializes the graph to JSON format for resource streaming. |
 
 ---
@@ -78,9 +78,9 @@ This catalog documents every function, method, struct, and class across the `@au
 
 | Function / Symbol | Visibility | Signature | Description |
 | :--- | :--- | :--- | :--- |
-| `parse_source_file` | `pub fn` | `(path: &Path, content: &str) -> Vec<ParsedSymbol>` | Polyglot router dispatching Tier 1 AST or Tier 2/3 deterministic heuristics. |
-| `parse_ast` | `pub fn` | `(lang: &str, content: &str) -> Vec<ParsedSymbol>` | Tree-Sitter AST extractor for TS, JS, Python, Rust, Go, Java, and C/C++. |
-| `parse_heuristics` | `pub fn` | `(lang: &str, content: &str) -> Vec<ParsedSymbol>` | Deterministic regex heuristics for Top 20 TIOBE languages (SQL, C#, PHP, etc.). |
+| `parse_file` | `pub fn` | `(content: &str, rel_path: &str, ext: &str) -> ParseOutput` | Routes a file through a configured Tree-sitter parser or heuristic extraction and reports partial coverage when AST support is unavailable. |
+| `parse_ast` | `pub fn` | `(content: &str, rel_path: &str, ext: &str) -> Option<ParseOutput>` | Tree-sitter extraction for configured TS/TSX, JS/JSX, Python, Rust, Go, Java, C, and header extensions. It does not provide C++ grammar or full semantic resolution. |
+| `parse_heuristics` | `pub fn` | `(content: &str, rel_path: &str, ext: &str) -> ParseOutput` | Heuristic candidate extraction; unsupported AST coverage is reported as partial by the parser router. |
 | `calculate_cyclomatic_complexity` | `pub fn` | `(node: &tree_sitter::Node, lang: &str) -> u32` | AST-based cyclomatic complexity calculator ($CC = 1 + \text{decisions}$). |
 | `calculate_text_complexity` | `pub fn` | `(code: &str) -> u32` | Text-based control flow branching complexity calculator. |
 
@@ -113,7 +113,7 @@ This catalog documents every function, method, struct, and class across the `@au
 | `handleScanRepository` | `export async fn` | `(args: ScanRepositoryInput): Promise<ScanResult>` | Orchestrates repository discovery and metrics computation. |
 | `handleGetC4Diagram` | `export async fn` | `(args: GetC4DiagramInput): Promise<{ diagram: string }>` | Dispatches visual diagram generation at requested C4 level. |
 | `handleGetSymbolContract` | `export async fn`| `(args: GetSymbolContractInput): Promise<ContractResult>` | Extracts symbol signature wrapped in prompt security boundary. |
-| `handleTraceDataFlow` | `export async fn` | `(args: TraceDataFlowInput): Promise<DataFlowResult>` | Traces taint path across call graph from source to sink. |
+| `handleTraceDataFlow` | `export async fn` | `(args: TraceDataFlowInput): Promise<DataFlowResult>` | Finds an evidence-backed call graph path between symbol identifiers; taint status remains unknown. |
 | `handleListApiContracts`| `export async fn` | `(args: ListApiContractsInput): Promise<ApiListResult>` | Returns inventory of exposed and consumed API protocols. |
 | `handleListSocketContracts`| `export async fn` | `(args: ListSocketContractsInput): Promise<SocketListResult>` | Inventories Socket.io events, payload interfaces, and WebRTC signals. |
 | `handleExportDocumentation`| `export async fn` | `(args: ExportDocInput): Promise<ExportResult>` | Synthesizes and exports complete Diátaxis living documentation tree. |
@@ -164,7 +164,7 @@ This catalog documents every function, method, struct, and class across the `@au
 | :--- | :--- | :--- | :--- |
 | `ArchitectureAnalyzer` | `export class` | `constructor(repoPath: string)` | Derives dynamic C4 Level 1-3 graphs from dependencies and SQLite. |
 | `RestAnalyzer` | `export class` | `constructor(repoPath: string, options?)` | Discovers HTTP endpoints across Express, NestJS, FastAPI, and Spring Boot; `includeTests`, `llmEnrichment` options. |
-| `RestAnalyzer.applyLlmValidation` | `public async` | `(): Promise<EnrichmentReport>` | Pass-2 LLM pruning of ambiguous candidates staged during discovery. |
+| `RestAnalyzer.applyLlmValidation` | `public async` | `(): Promise<EnrichmentReport>` | Pass-2 advisory annotations for ambiguous candidates; static endpoints remain unchanged. |
 | `RealtimeAnalyzer` | `export class` | `constructor(repoPath: string)` | Discovers Socket.io, WebSocket, and WebRTC contracts and payload types. |
 | `SchemaAnalyzer` | `export class` | `constructor(repoPath: string)` | Reverse engineers Mongoose, Prisma, and JPA models, rules, and enums. |
 | `HonestyAnalyzer` | `export class` | `constructor(repoPath: string)` | Cross-checks declared types against imperative calls for dead/orphan code. |
@@ -179,6 +179,6 @@ This catalog documents every function, method, struct, and class across the `@au
 
 | Function / Class | Visibility | Signature | Description |
 | :--- | :--- | :--- | :--- |
-| `DiataxisGenerator` | `export class` | `constructor(repoPath: string)` | Synthesizes documentation across all four Diátaxis quadrants. |
+| `DiataxisGenerator` | `export class` | `constructor(repoPath: string)` | Synthesizes architecture/explanation reports, reference catalogs, and a conditional getting-started tutorial; it does not currently generate How-To guides. |
 | `DiataxisGenerator.synthesizeFullDocumentation` | `public` | `(): GeneratedDocFile[]` | Generates system overview, quirks, HTTP, socket, and model specs in memory. |
 | `DiataxisGenerator.exportToDirectory` | `public` | `(targetDir: string): ExportSummary` | Writes the synthesized markdown files to the target directory on disk. |

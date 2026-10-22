@@ -43,7 +43,7 @@ AutoDoc registers eleven native tools under the `tools/call` namespace:
 1. autodoc_scan_repository     -> Multi-threaded file discovery, AST parsing and LOC metrics
 2. autodoc_get_c4_diagram       -> Dynamic C4 architectural diagram generation (Levels 1 to 4)
 3. autodoc_get_symbol_contract  -> Deterministic AST signature extraction with prompt guard & CC
-4. autodoc_trace_data_flow      -> Call graph pathfinding and taint tracing
+4. autodoc_trace_data_flow      -> Snapshot-backed call graph pathfinding
 5. autodoc_list_api_contracts   -> Multi-decade enterprise protocol inventory (REST, SOAP, gRPC)
 6. autodoc_list_socket_contracts-> Realtime WebSocket / Socket.io events and WebRTC contracts
 7. autodoc_export_documentation -> Living Diátaxis documentation generation and filesystem export
@@ -208,7 +208,7 @@ Extracts deterministic function and method signatures directly from AST parsing.
 
 ### 3.4. `autodoc_trace_data_flow`
 
-Traces paths in the dependency and call graphs between an entrypoint and a target sink to identify data flows, security boundaries, and storage operations.
+Returns a path through resolved call relations in the selected repository snapshot. It does not trace taint or prove sanitization, security properties, or data flow.
 
 #### Input Schema
 ```json
@@ -225,14 +225,18 @@ Traces paths in the dependency and call graphs between an entrypoint and a targe
     },
     "targetSink": {
       "type": "string",
-      "description": "Target persistence sink, database table, or external API client."
+      "description": "Target symbol/FQSN in the call graph. This is not a database or data-flow sink."
+    },
+    "target_sink": {
+      "type": "string",
+      "description": "Alias for targetSink. Conflicting aliases are rejected."
     },
     "maxDepth": {
       "type": "integer",
       "minimum": 1,
       "maximum": 20,
       "default": 5,
-      "description": "Maximum depth for breadth-first graph traversal."
+      "description": "Maximum graph depth. Default: 5; conflicting aliases are rejected."
     }
   }
 }
@@ -241,15 +245,17 @@ Traces paths in the dependency and call graphs between an entrypoint and a targe
 #### Output Payload
 ```json
 {
+  "contractVersion": 2,
+  "status": "NOT_SCANNED",
+  "analysisKind": "call_graph",
   "source": "handleScanRepository",
-  "sink": "sqlite_edges",
-  "path": [
-    { "node": "handleScanRepository", "kind": "entrypoint" },
-    { "node": "scan_repository_native", "kind": "ffi_bridge" },
-    { "node": "cache::SqliteCache::insert_edge", "kind": "sink" }
-  ],
-  "depth": 3,
-  "reachesSink": true
+  "sink": null,
+  "maxDepth": 5,
+  "taintStatus": "UNKNOWN",
+  "nodes": [],
+  "edges": [],
+  "path": [],
+  "diagnostics": []
 }
 ```
 
@@ -258,6 +264,8 @@ Traces paths in the dependency and call graphs between an entrypoint and a targe
 ### 3.5. `autodoc_list_api_contracts`
 
 Returns an inventory of exposed and consumed API endpoints across modern and legacy integration protocols.
+
+Regex-discovered routes are heuristic candidates, not evidence-backed API facts. When a page contains them, `coverage.state` is `partial` and `coverage.diagnostics` includes `API_ROUTE_HEURISTIC_NO_EVIDENCE`.
 
 #### Input Schema
 ```json
@@ -283,6 +291,10 @@ Returns an inventory of exposed and consumed API endpoints across modern and leg
     "cursor": {
       "type": "string",
       "description": "Pagination cursor for large API inventories."
+    },
+    "scan_id": {
+      "type": "string",
+      "description": "Optional retained snapshot generation to query."
     }
   }
 }
@@ -291,29 +303,22 @@ Returns an inventory of exposed and consumed API endpoints across modern and leg
 #### Output Payload
 ```json
 {
-  "protocolsSupported": [
-    "REST (OpenAPI 3.0)",
-    "gRPC (Protobuf v3)",
-    "SOAP (WSDL 1.1/2.0)",
-    "GraphQL (SDL)",
-    "CORBA (OMG IDL)",
-    "WCF (.NET)",
-    "FlatBuffers"
-  ],
-  "endpoints": [
+  "contractVersion": 2,
+  "protocolsSupported": ["REST", "SOAP", "GRPC", "GRAPHQL", "CORBA", "WCF", "FLATBUFFERS"],
+  "scanId": "scan-id",
+  "contracts": [
     {
       "protocol": "REST",
-      "path": "/api/v1/scan",
+      "endpoint": "/api/v1/scan",
       "method": "POST",
-      "auth": "Bearer"
-    },
-    {
-      "protocol": "GRPC",
-      "path": "AutoDocService/Ping",
-      "method": "POST",
-      "auth": "None"
+      "confidence": "regex"
     }
-  ]
+  ],
+  "items": [{ "protocol": "REST", "endpoint": "/api/v1/scan", "method": "POST", "confidence": "regex" }],
+  "total": 1,
+  "nextCursor": null,
+  "truncated": false,
+  "coverage": { "state": "partial", "diagnostics": [{ "code": "API_ROUTE_HEURISTIC_NO_EVIDENCE" }] }
 }
 ```
 
@@ -344,6 +349,10 @@ Discovers Socket.io events, WebSocket listeners and emitters, typed event payloa
     "cursor": {
       "type": "string",
       "description": "Pagination cursor."
+    },
+    "scan_id": {
+      "type": "string",
+      "description": "Optional retained snapshot generation to query."
     }
   }
 }
@@ -353,7 +362,9 @@ Discovers Socket.io events, WebSocket listeners and emitters, typed event payloa
 ```json
 {
   "protocolsSupported": ["SOCKET_IO", "WEBRTC", "WEBSOCKET"],
+  "contractVersion": 2,
   "directionFilter": "ALL",
+  "scanId": "scan-id",
   "contracts": [
     {
       "eventName": "webrtc:offer",
@@ -364,7 +375,11 @@ Discovers Socket.io events, WebSocket listeners and emitters, typed event payloa
       "isTypedContract": true
     }
   ],
-  "total": 1
+  "items": [{ "eventName": "webrtc:offer", "direction": "BIDIRECTIONAL", "payloadType": "RTCSessionDescriptionInit | RTCIceCandidateInit", "sourceFile": "packages/autodoc-mcp/src/analyzers/realtime/index.ts", "protocol": "WEBRTC", "isTypedContract": true }],
+  "total": 1,
+  "nextCursor": null,
+  "truncated": false,
+  "coverage": { "state": "partial", "diagnostics": [] }
 }
 ```
 
@@ -372,7 +387,7 @@ Discovers Socket.io events, WebSocket listeners and emitters, typed event payloa
 
 ### 3.7. `autodoc_export_documentation`
 
-Synthesizes living technical documentation structured according to the Diátaxis documentation framework (Tutorials, How-To Guides, Technical Reference, and Architectural Explanation) directly from the SQLite graph and exports it to the filesystem.
+Synthesizes architecture/explanation reports, reference catalogs, and a getting-started tutorial when supported by the detected project, using one selected snapshot, then exports them to the filesystem. How-To guides are not currently generated.
 
 #### Input Schema
 ```json
@@ -390,7 +405,7 @@ Synthesizes living technical documentation structured according to the Diátaxis
     },
     "include_tests": {
       "type": "boolean",
-      "default": true,
+      "default": false,
       "description": "Include source code references in generated documents."
     }
   }
@@ -400,7 +415,10 @@ Synthesizes living technical documentation structured according to the Diátaxis
 #### Output Payload
 ```json
 {
-  "status": "SUCCESS",
+  "status": "PARTIAL",
+  "scanId": "scan-id",
+  "repositoryRoot": "/path/to/repository",
+  "coverage": { "state": "partial", "diagnostics": [] },
   "targetDirectory": "./docs",
   "filesGenerated": 7,
   "files": [
@@ -409,8 +427,8 @@ Synthesizes living technical documentation structured according to the Diátaxis
     "reference/http-endpoints.md",
     "reference/socket-events.md",
     "reference/data-models.md",
-    "tutorials/getting-started.md",
-    "how-to/add-new-module.md"
+    "architecture/repository-maps.md",
+    "tutorials/getting-started.md"
   ],
   "message": "Diátaxis living documentation successfully synthesized into ./docs"
 }
@@ -488,12 +506,13 @@ Executes cache truncation, journal checkpointing, and vacuuming on the local SQL
 
 ## 4. Virtual Resources
 
-AutoDoc exposes static and dynamic MCP resources through `resources/list` and `resources/read`:
+Architecture/map resources are projected from the same pinned snapshot used by their equivalent tools. Resource URIs may carry `scan_id` to keep reads on a selected generation; an unavailable or expired generation returns an explicit snapshot error.
 
-| Resource URI | MIME Type | Description |
-| :--- | :--- | :--- |
-| `code://c4/2` | `text/vnd.mermaid` | Dynamic C4 Container architecture diagram in Mermaid format. |
-| `code://graph/callgraph` | `application/json` | Canonical in-memory call graph exported as node-link JSON data. |
+### Scan and cache contract (version 2)
+
+Repository scan responses include attempted `scanId`, `activeScanId`, `analysisState` (`complete`, `partial`, or `failed`), `coverageState` (`complete` or `partial`) and stage diagnostics. `analysisState` describes scan execution and publication; `coverageState: partial` means at least one candidate language has incomplete semantic extraction even if its inventory snapshot was published. MCP `status` is `SUCCESS`, `PARTIAL`, or `FAILED`; a failed native scan is never represented as an empty successful project. A missing root fails before cache creation. Files are analyzed in a separate staging database; complete generations publish inventory, symbols, relationships, evidence, and FTS atomically. Read/parse/persistence failures preserve the prior active generation, and an older attempt cannot publish after a newer attempt starts. SQLite schema migrations preserve legacy rows for diagnostics, mark old scans unverified, and reject a newer schema before changing pragmas, sidecars, or `user_version`. Snapshot metadata and pages carry `scanId`; cursors bind to the selected root, generation, collection, and filter. Retained generations are immutable and expire under the configured retention policy; a read of an expired generation returns `SNAPSHOT_UNAVAILABLE`.
+
+Documentation exports write `.autodoc-manifest.json` with generated paths and hashes. Re-export refuses to overwrite manual or user-edited files and removes stale outputs only when bytes still match the prior manifest. A native SQLite transaction lock is keyed by the destination directory's device/inode identity and stored under `$XDG_STATE_HOME/autodoc/export-locks` (or `~/.local/state/autodoc/export-locks`); SQLite releases it if the process exits. On Linux, the exporter pins the destination root descriptor and anchors staging, journal, commit, rollback, recovery, and cleanup paths to it. Recovery quarantines a candidate before comparing bytes, so a concurrent edit is preserved and the journal remains available for retry. Invalid ownership or MAC data returns a conflict and unknown staging paths remain untouched. Export currently fails closed on non-Linux systems because equivalent directory-descriptor protections are not implemented there. Files/directories are not fsynced, so power-loss durability is not claimed.
 
 ---
 

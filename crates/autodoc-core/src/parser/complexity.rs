@@ -5,15 +5,18 @@ pub fn calculate_text_complexity(code: &str) -> i32 {
     for line in code.lines() {
         let trimmed = line.trim();
         // Skip pure comments
-        if trimmed.starts_with("//") || trimmed.starts_with('#') || trimmed.starts_with("/*") || trimmed.starts_with('*') {
+        if trimmed.starts_with("//")
+            || trimmed.starts_with('#')
+            || trimmed.starts_with("/*")
+            || trimmed.starts_with('*')
+        {
             continue;
         }
 
         // Branching keywords
         let branch_keywords = [
-            "if ", "if(", "elif ", "elif(", "else if", "while ", "while(",
-            "for ", "for(", "case ", "catch ", "catch(", "except ", "except:",
-            "&&", "||", " ? ",
+            "if ", "if(", "elif ", "elif(", "else if", "while ", "while(", "for ", "for(", "case ",
+            "catch ", "catch(", "except ", "except:", "&&", "||", " ? ",
         ];
 
         for kw in branch_keywords {

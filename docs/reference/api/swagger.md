@@ -14,7 +14,7 @@ The formal OpenAPI 3.1.0 specification is available in YAML format: [`docs/refer
 | `POST` | `/api/v1/scan` | Trigger Repository Scan | `Scanner` |
 | `POST` | `/api/v1/diagrams/c4` | Generate C4 Architectural Diagram | `Diagrams` |
 | `GET` | `/api/v1/symbols/contract` | Extract AST Symbol Contract | `Symbols` |
-| `POST` | `/api/v1/dataflow/trace` | Trace Taint Data Flow | `Analysis` |
+| `POST` | `/api/v1/dataflow/trace` | Find Evidence-Backed Call Graph Path | `Analysis` |
 | `GET` | `/api/v1/contracts` | Inventory Enterprise API Contracts | `Contracts` |
 | `GET` | `/api/v1/contracts/sockets` | Inventory Realtime Socket & WebRTC Contracts | `Contracts` |
 | `POST` | `/api/v1/export/docs` | Export Living Diátaxis Documentation | `Documentation` |

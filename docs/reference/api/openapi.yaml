@@ -4,7 +4,7 @@ info:
   description: |
     Canonical REST API specification for AutoDoc Code Explorer.
     Exposes endpoints for repository scanning, C4 diagram generation, symbol contract extraction,
-    data flow taint tracing, protocol inventory, and privacy-compliant cache maintenance.
+    call graph path queries, protocol inventory, and privacy-compliant cache maintenance.
   version: 0.1.0
   contact:
     name: Daniel Gonçalves Araujo
@@ -164,10 +164,10 @@ paths:
 
   /dataflow/trace:
     post:
-      summary: Trace Taint Data Flow
+      summary: Find Call Graph Path
       description: |
-        Traverses the dependency and call graph to trace data flows between entrypoint sources
-        and target persistence sinks or external network interfaces.
+        Traverses resolved call relations between source and target symbol identifiers.
+        This does not establish taint propagation, sanitization, or data flow.
       operationId: traceDataFlow
       tags:
         - Analysis
@@ -179,7 +179,7 @@ paths:
               $ref: '#/components/schemas/TraceDataFlowRequest'
       responses:
         '200':
-          description: Graph traversal path from source to sink.
+          description: Evidence-backed call graph path. This is not proof of data flow or taint propagation.
           content:
             application/json:
               schema:
@@ -671,7 +671,8 @@ components:
           example: "handleScanRepository"
         targetSink:
           type: string
-          example: "sqlite_edges"
+          description: Target symbol or fully qualified symbol name in the call graph.
+          example: "src/storage.ts::saveRecord"
         maxDepth:
           type: integer
           default: 5
@@ -682,21 +683,27 @@ components:
       required:
         - source
         - depth
-        - reachesSink
+        - reachesTarget
         - path
+        - taintStatus
       properties:
         source:
           type: string
           example: "handleScanRepository"
         target:
           type: string
-          example: "sqlite_edges"
+          description: Target symbol identifier in the call graph.
+          example: "src/storage.ts::saveRecord"
         depth:
           type: integer
           example: 3
-        reachesSink:
+        reachesTarget:
           type: boolean
           example: true
+        taintStatus:
+          type: string
+          enum: [UNKNOWN]
+          example: UNKNOWN
         path:
           type: array
           items:

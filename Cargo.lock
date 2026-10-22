@@ -46,6 +46,7 @@ dependencies = [
  "crossbeam-channel",
  "ignore",
  "lasso",
+ "libc",
  "mimalloc",
  "napi",
  "napi-build",

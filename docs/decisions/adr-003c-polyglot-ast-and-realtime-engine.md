@@ -9,9 +9,9 @@ AutoDoc was enhanced to address static analysis shortcomings on polyglot codebas
 
 ## Decisions
 
-1. **Tree-Sitter & Deterministic Heuristics (Top 20 TIOBE)**:
-   - Native Tree-Sitter grammars for Tier 1 languages (TypeScript, JavaScript, Python, Rust, Go, Java, C/C++).
-   - Deterministic heuristic and cyclomatic complexity parsers for Tier 2/3 languages (SQL, C#, PHP, Ruby, Kotlin, Swift, R, Fortran, Delphi, MATLAB, Perl, VB, Bash, Assembly).
+1. **Tree-Sitter & Heuristic Language Support**:
+   - Configured Tree-sitter grammars cover TypeScript/TSX, JavaScript/JSX, Python, Rust, Go, Java, and C/header extensions. This list does not include C++.
+   - Other languages use heuristic extraction where available; unsupported AST coverage is reported as partial rather than promised as complete.
 
 2. **SQLite WAL High-Throughput Batch Ingestion**:
    - Atomic bulk transactions (`insert_batch_analysis`, `write_bulk_edges`) replacing unbatched channel insertions.
@@ -28,5 +28,5 @@ AutoDoc was enhanced to address static analysis shortcomings on polyglot codebas
 5. **Honesty Policy & Dead Code Detection**:
    - Compares declared typed interfaces against imperative socket calls to detect dead-declared events, undeclared/untyped events, and orphan function symbols.
 
-6. **Diátaxis Documentation Synthesis**:
-   - `autodoc_export_documentation` synthesizes Markdown across the 4 Diátaxis quadrants: Tutorials, How-To guides, Technical Reference, and Architecture Explanation.
+6. **Documentation Synthesis**:
+   - `autodoc_export_documentation` currently exports architecture/explanation reports, reference catalogs, and a getting-started tutorial when supported by the detected project. How-To guides are not currently generated.

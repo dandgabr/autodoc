@@ -1,0 +1,53 @@
+{
+  "profile": "unsupported",
+  "capabilities": [],
+  "symbols": [],
+  "inventory": [
+    {
+      "path": "data.yaml",
+      "category": "infra",
+      "support": "heuristic",
+      "contentSha256": "7711101caebbbdf8fe39529a6438da7790592b7dd26eabc918bef13f019ade2f"
+    }
+  ],
+  "facts": [],
+  "evidence": [],
+  "relations": [],
+  "endpoints": [],
+  "coverage": {
+    "scan": {
+      "state": "complete",
+      "diagnostics": []
+    },
+    "symbols": {
+      "state": "unsupported",
+      "diagnostic": "No source-language file exists in this fixture; zero symbols is not proof of an empty program."
+    },
+    "facts": {
+      "state": "unsupported",
+      "diagnostic": "Native scan does not emit semantic Fact rows yet.",
+      "diagnosticCode": "FACT_EXTRACTION_UNAVAILABLE"
+    },
+    "evidence": {
+      "state": "partial",
+      "diagnostic": "Native scan emits callsite evidence only.",
+      "diagnosticCode": "CALLSITE_EVIDENCE_ONLY"
+    },
+    "relations": {
+      "state": "partial",
+      "diagnostic": "Native scan emits call relations only.",
+      "diagnosticCode": "CALL_RELATIONS_ONLY"
+    },
+    "schema": {
+      "state": "unsupported",
+      "diagnostic": "Native scan does not emit schema facts yet.",
+      "diagnosticCode": "SCHEMA_FACT_EXTRACTION_UNAVAILABLE"
+    },
+    "diagrams": {
+      "state": "complete",
+      "diagnostic": "Generated Mermaid blocks parse and match the expected per-profile count; visual contrast and clipping are not measured."
+    }
+  },
+  "schemas": [],
+  "diagramCount": 2
+}

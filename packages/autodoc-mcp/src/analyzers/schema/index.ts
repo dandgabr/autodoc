@@ -1,6 +1,8 @@
 import { readFileSync, readdirSync, statSync } from "node:fs";
-import { join, extname, basename } from "node:path";
+import { join, extname, relative } from "node:path";
 import { isIgnoredDirectory, isTestPath } from "../utils.js";
+import type { SnapshotContext } from "../../analysis/snapshot.js";
+import { readInventoryFiles, readVerifiedSource } from "../../analysis/source-reader.js";
 
 export interface DataField {
   name: string;
@@ -42,24 +44,32 @@ export interface DomainRuleContract {
 
 export interface SchemaAnalyzerOptions {
   includeTests?: boolean;
+  snapshot?: SnapshotContext;
 }
 
 export class SchemaAnalyzer {
   private repoPath: string;
   private includeTests: boolean;
+  private snapshot?: SnapshotContext;
 
   constructor(repoPath: string = process.cwd(), options: SchemaAnalyzerOptions = {}) {
     this.repoPath = repoPath;
     this.includeTests = options.includeTests ?? false;
+    this.snapshot = options.snapshot;
   }
 
-  public discoverModels(limit: number = 100, includeSubdocuments: boolean = false, includeTests?: boolean): DataModelContract[] {
+  private readText(filePath: string): string {
+    if (this.snapshot) return readVerifiedSource(this.snapshot, relative(this.snapshot.repositoryRoot, filePath).split("\\").join("/")).toString("utf8");
+    return readFileSync(filePath, "utf-8");
+  }
+
+  public discoverModels(limit: number = Number.MAX_SAFE_INTEGER, includeSubdocuments: boolean = false, includeTests?: boolean): DataModelContract[] {
     const models: Map<string, DataModelContract> = new Map();
     const effectiveIncludeTests = includeTests ?? this.includeTests;
     const sourceFiles = this.findSourceFiles(this.repoPath, 0, effectiveIncludeTests);
 
     for (const file of sourceFiles) {
-      const content = readFileSync(file, "utf-8");
+      const content = this.readText(file);
       const relPath = this.toRelative(file);
       const ext = extname(file);
 
@@ -145,7 +155,7 @@ export class SchemaAnalyzer {
     const sourceFiles = this.findSourceFiles(this.repoPath);
 
     for (const file of sourceFiles) {
-      const content = readFileSync(file, "utf-8");
+      const content = this.readText(file);
       const relPath = this.toRelative(file);
 
       if (/Status|State|Phase|StateMachine|Transition/i.test(content)) {
@@ -215,18 +225,17 @@ export class SchemaAnalyzer {
     while ((discMatch = discRegex.exec(content)) !== null) {
       const baseVar = discMatch[1];
       const discName = discMatch[2];
-      const baseModel = baseVar ? baseVar.replace(/Model$/i, "") : "Match";
+      const baseModel = registeredRootModels.get(baseVar)?.modelName;
       out.set(discName, {
         modelName: discName,
-        collectionOrTable: `${baseModel.toLowerCase()}s (discriminator)`,
+        collectionOrTable: baseModel ? `${baseModel.toLowerCase()}s (discriminator)` : "discriminator",
         fields: [],
         sourceFile: relPath,
         framework: "Mongoose",
         hasSoftDelete: true,
         hasTimestamps: true,
         isDiscriminator: true,
-        baseModel,
-        discriminatorKey: "moduleId",
+        ...(baseModel ? { baseModel } : {}),
         isSubdocument: false,
       });
     }
@@ -236,19 +245,17 @@ export class SchemaAnalyzer {
     let regMatch;
     while ((regMatch = regMatchDiscRegex.exec(content)) !== null) {
       const id = (regMatch[1] || regMatch[2] || "").replace(/['"`]/g, "");
-      if (id && id !== "moduleId") {
-        const discName = `Match:${id}`;
+      if (id) {
+        const discName = id;
         out.set(discName, {
           modelName: discName,
-          collectionOrTable: "matches (discriminator)",
+          collectionOrTable: "discriminator",
           fields: [],
           sourceFile: relPath,
           framework: "Mongoose",
           hasSoftDelete: true,
           hasTimestamps: true,
           isDiscriminator: true,
-          baseModel: "Match",
-          discriminatorKey: "moduleId",
           isSubdocument: false,
         });
       }
@@ -346,26 +353,8 @@ export class SchemaAnalyzer {
       }
     }
 
-    // Check matches: { schema: ... } in module definitions
-    if (content.includes("matches:") && relPath.includes("modules/")) {
-      const modName = basename(join(relPath, ".."));
-      const discName = `Match:${modName}`;
-      if (!out.has(discName)) {
-        out.set(discName, {
-          modelName: discName,
-          collectionOrTable: "matches (discriminator)",
-          fields: [],
-          sourceFile: relPath,
-          framework: "Mongoose",
-          hasSoftDelete: true,
-          hasTimestamps: true,
-          isDiscriminator: true,
-          baseModel: "Match",
-          discriminatorKey: "moduleId",
-          isSubdocument: false,
-        });
-      }
-    }
+    // A property named `matches` in an arbitrary module does not prove an ODM
+    // discriminator relationship, so it is not promoted to a model edge.
   }
 
   private parseMongooseFields(body: string): DataField[] {
@@ -392,7 +381,7 @@ export class SchemaAnalyzer {
         });
       }
     }
-    return fields.slice(0, 20);
+    return fields;
   }
 
   private parseCompoundIndexes(content: string): CompoundIndex[] {
@@ -445,7 +434,7 @@ export class SchemaAnalyzer {
       out.set(modelName, {
         modelName,
         collectionOrTable: modelName.toLowerCase(),
-        fields: fields.slice(0, 20),
+        fields,
         sourceFile: relPath,
         framework: "Prisma",
         hasSoftDelete: /deletedAt/i.test(body),
@@ -553,6 +542,11 @@ export class SchemaAnalyzer {
   }
 
   private findSourceFiles(dir: string, depth: number = 0, includeTests: boolean = this.includeTests): string[] {
+    if (this.snapshot) return readInventoryFiles(this.snapshot)
+      .filter((file) => file.contentSha256 && !file.readError && !file.excludedReason)
+      .filter((file) => includeTests || !isTestPath(file.path))
+      .filter((file) => [".ts", ".tsx", ".js", ".jsx", ".prisma", ".sql", ".py", ".go", ".rs", ".java", ".kt", ".cs"].includes(extname(file.path)))
+      .map((file) => join(this.snapshot!.repositoryRoot, file.path));
     if (depth > 15) return [];
     const files: string[] = [];
     try {

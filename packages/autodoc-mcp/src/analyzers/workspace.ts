@@ -1,5 +1,7 @@
-import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { join, basename, relative } from "node:path";
+import type { SnapshotContext } from "../analysis/snapshot.js";
+import { readInventoryFiles, readVerifiedSource, StaleSourceError } from "../analysis/source-reader.js";
 
 export interface WorkspacePackage {
   name: string;
@@ -44,19 +46,40 @@ export interface WorkspaceInfo {
   packages: WorkspacePackage[];
   packageDependencyGraph: Record<string, string[]>;
   commands: {
-    install: string;
-    build: string;
-    test: string;
-    dev: string;
+    install: string | null;
+    build: string | null;
+    test: string | null;
+    dev: string | null;
   };
   makefile?: MakefileWorkflow;
 }
 
 export class WorkspaceAnalyzer {
   private repoPath: string;
+  private snapshot?: SnapshotContext;
 
-  constructor(repoPath: string = process.cwd()) {
+  constructor(repoPath: string = process.cwd(), snapshot?: SnapshotContext) {
     this.repoPath = repoPath;
+    this.snapshot = snapshot;
+  }
+
+  private readText(filePath: string): string {
+    if (this.snapshot) return readVerifiedSource(this.snapshot, relative(this.snapshot.repositoryRoot, filePath).split("\\").join("/")).toString("utf8");
+    return readFileSync(filePath, "utf-8");
+  }
+
+  private exists(filePath: string): boolean {
+    if (!this.snapshot) return existsSync(filePath);
+    const relPath = relative(this.snapshot.repositoryRoot, filePath).split("\\").join("/").replace(/^\.$/, "");
+    const prefix = relPath ? `${relPath}/` : "";
+    return readInventoryFiles(this.snapshot).some((file) => (file.path === relPath || file.path.startsWith(prefix)) && !file.excludedReason);
+  }
+
+  private readDirectory(dirPath: string): string[] {
+    if (!this.snapshot) return readdirSync(dirPath);
+    const relDir = relative(this.snapshot.repositoryRoot, dirPath).split("\\").join("/").replace(/^\.$/, "");
+    const prefix = relDir ? `${relDir}/` : "";
+    return [...new Set(readInventoryFiles(this.snapshot).flatMap((file) => file.path.startsWith(prefix) ? [file.path.slice(prefix.length).split("/")[0]] : []))].filter(Boolean).sort();
   }
 
   public analyze(): WorkspaceInfo {
@@ -99,9 +122,9 @@ export class WorkspaceAnalyzer {
 
   private hasExplicitMonorepoConfig(): boolean {
     return (
-      existsSync(join(this.repoPath, "pnpm-workspace.yaml")) ||
-      existsSync(join(this.repoPath, "lerna.json")) ||
-      existsSync(join(this.repoPath, "go.work")) ||
+      this.exists(join(this.repoPath, "pnpm-workspace.yaml")) ||
+      this.exists(join(this.repoPath, "lerna.json")) ||
+      this.exists(join(this.repoPath, "go.work")) ||
       this.hasCargoWorkspace() ||
       this.hasNpmWorkspaces()
     );
@@ -109,64 +132,66 @@ export class WorkspaceAnalyzer {
 
   private hasCargoWorkspace(): boolean {
     const cargoPath = join(this.repoPath, "Cargo.toml");
-    if (!existsSync(cargoPath)) return false;
+    if (!this.exists(cargoPath)) return false;
     try {
-      const content = readFileSync(cargoPath, "utf-8");
+      const content = this.readText(cargoPath);
       return content.includes("[workspace]");
-    } catch {
+    } catch (error) {
+        if (error instanceof StaleSourceError) throw error;
       return false;
     }
   }
 
   private hasNpmWorkspaces(): boolean {
     const pkgPath = join(this.repoPath, "package.json");
-    if (!existsSync(pkgPath)) return false;
+    if (!this.exists(pkgPath)) return false;
     try {
-      const data = JSON.parse(readFileSync(pkgPath, "utf-8"));
+      const data = JSON.parse(this.readText(pkgPath));
       return Array.isArray(data.workspaces) || !!data.workspaces?.packages;
-    } catch {
+    } catch (error) {
+        if (error instanceof StaleSourceError) throw error;
       return false;
     }
   }
 
   private detectPackageManager(): PackageManagerType {
-    if (existsSync(join(this.repoPath, "pnpm-lock.yaml")) || existsSync(join(this.repoPath, "pnpm-workspace.yaml"))) {
+    if (this.exists(join(this.repoPath, "pnpm-lock.yaml")) || this.exists(join(this.repoPath, "pnpm-workspace.yaml"))) {
       return "pnpm";
     }
-    if (existsSync(join(this.repoPath, "bun.lockb")) || existsSync(join(this.repoPath, "bunfig.toml"))) {
+    if (this.exists(join(this.repoPath, "bun.lockb")) || this.exists(join(this.repoPath, "bunfig.toml"))) {
       return "bun";
     }
-    if (existsSync(join(this.repoPath, "yarn.lock"))) {
+    if (this.exists(join(this.repoPath, "yarn.lock"))) {
       return "yarn";
     }
-    if (existsSync(join(this.repoPath, "package-lock.json")) || existsSync(join(this.repoPath, "package.json"))) {
+    if (this.exists(join(this.repoPath, "package-lock.json")) || this.exists(join(this.repoPath, "package.json"))) {
       return "npm";
     }
-    if (existsSync(join(this.repoPath, "Cargo.lock")) || existsSync(join(this.repoPath, "Cargo.toml"))) {
+    if (this.exists(join(this.repoPath, "Cargo.lock")) || this.exists(join(this.repoPath, "Cargo.toml"))) {
       return "cargo";
     }
-    if (existsSync(join(this.repoPath, "go.work")) || existsSync(join(this.repoPath, "go.mod"))) {
+    if (this.exists(join(this.repoPath, "go.work")) || this.exists(join(this.repoPath, "go.mod"))) {
       return "go";
     }
-    if (existsSync(join(this.repoPath, "poetry.lock")) || existsSync(join(this.repoPath, "pyproject.toml"))) {
+    if (this.exists(join(this.repoPath, "poetry.lock")) || this.exists(join(this.repoPath, "pyproject.toml"))) {
       return "poetry";
     }
-    if (existsSync(join(this.repoPath, "Pipfile")) || existsSync(join(this.repoPath, "requirements.txt"))) {
+    if (this.exists(join(this.repoPath, "Pipfile")) || this.exists(join(this.repoPath, "requirements.txt"))) {
       return "pip";
     }
-    if (existsSync(join(this.repoPath, "pom.xml"))) {
+    if (this.exists(join(this.repoPath, "pom.xml"))) {
       return "maven";
     }
-    if (existsSync(join(this.repoPath, "build.gradle")) || existsSync(join(this.repoPath, "build.gradle.kts"))) {
+    if (this.exists(join(this.repoPath, "build.gradle")) || this.exists(join(this.repoPath, "build.gradle.kts"))) {
       return "gradle";
     }
     if (this.hasDotnetSolution()) {
       return "dotnet";
     }
-    if (existsSync(join(this.repoPath, "composer.json"))) {
+    if (this.exists(join(this.repoPath, "composer.json"))) {
       return "composer";
     }
-    if (existsSync(join(this.repoPath, "Gemfile"))) {
+    if (this.exists(join(this.repoPath, "Gemfile"))) {
       return "bundler";
     }
     return "unknown";
@@ -174,9 +199,10 @@ export class WorkspaceAnalyzer {
 
   private hasDotnetSolution(): boolean {
     try {
-      const files = readdirSync(this.repoPath);
+      const files = this.readDirectory(this.repoPath);
       return files.some((f) => f.endsWith(".sln") || f.endsWith(".slnx"));
-    } catch {
+    } catch (error) {
+        if (error instanceof StaleSourceError) throw error;
       return false;
     }
   }
@@ -187,19 +213,20 @@ export class WorkspaceAnalyzer {
 
     for (const dirName of searchDirs) {
       const baseDir = join(this.repoPath, dirName);
-      if (existsSync(baseDir) && statSync(baseDir).isDirectory()) {
+      if (this.exists(baseDir)) {
         try {
-          const entries = readdirSync(baseDir);
+          const entries = this.readDirectory(baseDir);
           for (const entry of entries) {
             const subDir = join(baseDir, entry);
-            if (statSync(subDir).isDirectory()) {
+            if (this.exists(subDir)) {
               const pkg = this.tryReadPackage(subDir);
               if (pkg) {
                 packages.push(pkg);
               }
             }
           }
-        } catch {
+        } catch (error) {
+        if (error instanceof StaleSourceError) throw error;
           // Skip unreadable directories
         }
       }
@@ -222,9 +249,9 @@ export class WorkspaceAnalyzer {
 
     // 1. Node.js package.json
     const pkgJsonPath = join(dir, "package.json");
-    if (existsSync(pkgJsonPath)) {
+    if (this.exists(pkgJsonPath)) {
       try {
-        const data = JSON.parse(readFileSync(pkgJsonPath, "utf-8"));
+        const data = JSON.parse(this.readText(pkgJsonPath));
         const name = data.name || dirBasename;
         const deps = Object.keys(data.dependencies || {});
         const devDeps = Object.keys(data.devDependencies || {});
@@ -247,19 +274,20 @@ export class WorkspaceAnalyzer {
           type,
           manifestPath: pkgJsonPath,
         };
-      } catch {
+      } catch (error) {
+        if (error instanceof StaleSourceError) throw error;
         // Fallback
       }
     }
 
     // 2. Rust Cargo.toml
     const cargoTomlPath = join(dir, "Cargo.toml");
-    if (existsSync(cargoTomlPath)) {
+    if (this.exists(cargoTomlPath)) {
       try {
-        const content = readFileSync(cargoTomlPath, "utf-8");
+        const content = this.readText(cargoTomlPath);
         const nameMatch = /name\s*=\s*["']([^"']+)["']/.exec(content);
         const name = nameMatch ? nameMatch[1] : dirBasename;
-        const isBin = content.includes("[[bin]]") || existsSync(join(dir, "src", "main.rs"));
+        const isBin = content.includes("[[bin]]") || this.exists(join(dir, "src", "main.rs"));
 
         return {
           name,
@@ -271,19 +299,20 @@ export class WorkspaceAnalyzer {
           type: isBin ? "service" : "library",
           manifestPath: cargoTomlPath,
         };
-      } catch {
+      } catch (error) {
+        if (error instanceof StaleSourceError) throw error;
         // Fallback
       }
     }
 
     // 3. Go go.mod
     const goModPath = join(dir, "go.mod");
-    if (existsSync(goModPath)) {
+    if (this.exists(goModPath)) {
       try {
-        const content = readFileSync(goModPath, "utf-8");
+        const content = this.readText(goModPath);
         const modMatch = /module\s+([^\s\n]+)/.exec(content);
         const name = modMatch ? modMatch[1] : dirBasename;
-        const isMain = existsSync(join(dir, "main.go"));
+        const isMain = this.exists(join(dir, "main.go"));
 
         return {
           name,
@@ -295,16 +324,17 @@ export class WorkspaceAnalyzer {
           type: isMain ? "service" : "library",
           manifestPath: goModPath,
         };
-      } catch {
+      } catch (error) {
+        if (error instanceof StaleSourceError) throw error;
         // Fallback
       }
     }
 
     // 4. Python pyproject.toml
     const pyprojectPath = join(dir, "pyproject.toml");
-    if (existsSync(pyprojectPath)) {
+    if (this.exists(pyprojectPath)) {
       try {
-        const content = readFileSync(pyprojectPath, "utf-8");
+        const content = this.readText(pyprojectPath);
         const nameMatch = /name\s*=\s*["']([^"']+)["']/.exec(content);
         const name = nameMatch ? nameMatch[1] : dirBasename;
 
@@ -318,7 +348,8 @@ export class WorkspaceAnalyzer {
           type: "service",
           manifestPath: pyprojectPath,
         };
-      } catch {
+      } catch (error) {
+        if (error instanceof StaleSourceError) throw error;
         // Fallback
       }
     }
@@ -327,102 +358,28 @@ export class WorkspaceAnalyzer {
   }
 
   private resolveCommands(pm: PackageManagerType) {
-    switch (pm) {
-      case "pnpm":
-        return {
-          install: "pnpm install",
-          build: "pnpm build",
-          test: "pnpm test",
-          dev: "pnpm dev",
-        };
-      case "yarn":
-        return {
-          install: "yarn install",
-          build: "yarn build",
-          test: "yarn test",
-          dev: "yarn dev",
-        };
-      case "bun":
-        return {
-          install: "bun install",
-          build: "bun run build",
-          test: "bun test",
-          dev: "bun run dev",
-        };
-      case "cargo":
-        return {
-          install: "cargo fetch",
-          build: "cargo build --release",
-          test: "cargo test",
-          dev: "cargo run",
-        };
-      case "go":
-        return {
-          install: "go mod download",
-          build: "go build ./...",
-          test: "go test ./...",
-          dev: "go run .",
-        };
-      case "poetry":
-        return {
-          install: "poetry install",
-          build: "poetry build",
-          test: "poetry run pytest",
-          dev: "poetry run python main.py",
-        };
-      case "pip":
-        return {
-          install: "pip install -r requirements.txt",
-          build: "python -m build",
-          test: "pytest",
-          dev: "python app.py",
-        };
-      case "maven":
-        return {
-          install: "mvn dependency:resolve",
-          build: "mvn clean package",
-          test: "mvn test",
-          dev: "mvn spring-boot:run",
-        };
-      case "gradle":
-        return {
-          install: "./gradlew dependencies",
-          build: "./gradlew build",
-          test: "./gradlew test",
-          dev: "./gradlew bootRun",
-        };
-      case "dotnet":
-        return {
-          install: "dotnet restore",
-          build: "dotnet build",
-          test: "dotnet test",
-          dev: "dotnet run",
-        };
-      case "composer":
-        return {
-          install: "composer install",
-          build: "composer dump-autoload -o",
-          test: "composer test",
-          dev: "php -S localhost:8000",
-        };
-      default:
-        return {
-          install: "npm install",
-          build: "npm run build",
-          test: "npm test",
-          dev: "npm run dev",
-        };
+    let scripts: Record<string, string> = {};
+    const packageJsonPath = join(this.repoPath, "package.json");
+    if (this.exists(packageJsonPath)) {
+      try { scripts = JSON.parse(this.readText(packageJsonPath)).scripts ?? {}; } catch (error) {
+        if (error instanceof StaleSourceError) throw error; /* Invalid manifests do not imply scripts. */ }
     }
+    const runner = pm === "pnpm" ? "pnpm" : pm === "yarn" ? "yarn" : pm === "bun" ? "bun run" : "npm run";
+    const commands = (names: string[]) => {
+      const key = names.find((name) => typeof scripts[name] === "string");
+      return key ? `${runner} ${key}` : null;
+    };
+    return { install: null, build: commands(["build"]), test: commands(["test"]), dev: commands(["dev", "start"]) };
   }
 
   private detectMakefileWorkflow(): MakefileWorkflow {
     const makefilePath = join(this.repoPath, "Makefile");
-    if (!existsSync(makefilePath)) {
+    if (!this.exists(makefilePath)) {
       return { hasMakefile: false, targets: [] };
     }
 
     try {
-      const content = readFileSync(makefilePath, "utf-8");
+      const content = this.readText(makefilePath);
       const targetRegex = /^([a-zA-Z0-9_-]+)\s*:/gm;
       const targets: string[] = [];
       let match;
@@ -437,7 +394,8 @@ export class WorkspaceAnalyzer {
         devTarget,
         recommendedCommand: devTarget ? `make ${devTarget}` : undefined,
       };
-    } catch {
+    } catch (error) {
+        if (error instanceof StaleSourceError) throw error;
       return { hasMakefile: false, targets: [] };
     }
   }

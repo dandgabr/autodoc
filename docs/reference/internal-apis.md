@@ -217,12 +217,9 @@ pub struct CompactNode {
 ---
 
 ### 3.4. Polyglot AST Engine (`crates/autodoc-core/src/parser/`)
-The parsing subsystem operates on a tiered execution model guaranteeing Top 20 TIOBE language coverage:
-- **Tier 1 (Tree-Sitter AST, `ast.rs`)**:
-  - Leverages concrete syntax trees for TypeScript, JavaScript, Python, Rust, Go, Java, and C/C++.
-  - Extracts full symbol metadata: canonical identifier names, parameter lists, return types, docstrings, and line bounds.
-- **Tier 2/3 (Deterministic Heuristics, `heuristics.rs`)**:
-  - Employs deterministic regex patterns for SQL (DDL tables, views, stored procedures), C#, PHP, Ruby, Kotlin, Swift, R, Fortran, Delphi, MATLAB, Perl, Visual Basic, and Bash.
+The parser combines syntax-tree extraction for supported extensions with heuristic candidates for other files. It does not guarantee complete coverage across a language ranking:
+- **Tree-sitter AST (`ast.rs`)**: Grammars are configured for TypeScript/TSX, JavaScript/JSX, Python, Rust, Go, Java, and C/header files. Supported extraction records symbol and call-site metadata where the syntax is recognized; it does not claim full semantic/type resolution.
+- **Heuristics (`heuristics.rs`)**: Additional languages and unsupported syntax may produce useful candidates, but coverage is marked partial with `AST_UNSUPPORTED` where no AST grammar exists. A name match alone does not confirm a call relation.
 - **Complexity Analyzer (`complexity.rs`)**:
   - Computes cyclomatic complexity ($CC = 1 + \text{decision points}$) by scanning control flow branching constructs (`if`, `for`, `while`, `catch`, `&&`, `||`, `match`, `case`).
 
@@ -252,11 +249,7 @@ The parsing subsystem operates on a tiered execution model guaranteeing Top 20 T
   - Detects orphan function symbols (unreferenced non-entrypoint functions in SQLite graph).
 
 ### 4.6. `DiataxisGenerator` (`src/diataxis/generator.ts`)
-- Synthesizes living technical documentation structured across the 4 Diátaxis quadrants:
-  - `tutorials/`: Getting started guides.
-  - `how-to/`: Task-oriented guides for adding modules and endpoints.
-  - `reference/`: Catalog of REST endpoints, socket events, and data models.
-  - `architecture/`: C4 diagrams, technology stack overview, and quirks/dead-code honesty reports.
+- Synthesizes architecture/explanation reports, reference catalogs, and a getting-started tutorial when a package manager is detected. The current generator does not produce `how-to/` guides.
 
 ### 4.7. `OpenApiGenerator` (`src/analyzers/rest/openapi.ts`)
 - Compiles OpenAPI 3.1 documents by combining `RestAnalyzer` endpoint discovery with `SchemaAnalyzer` model extraction:

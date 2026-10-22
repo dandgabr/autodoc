@@ -69,89 +69,44 @@ To process repositories with millions of lines of code without exhausting agent 
 
 ---
 
-## Storage Engine: SQLite in WAL Mode
+## Snapshot Storage: SQLite
 
-AutoDoc stores graph metadata in `.autodoc/cache.db`.
+AutoDoc stores repository state in `.autodoc/cache.db` as immutable scan generations. `scan_runs` records each attempt and its diagnostics; `scan_state` tracks the active complete generation separately from the latest attempt. A complete scan is staged before publication, and readers pin a `scanId` so a query or page sequence cannot combine generations.
 
-### Pragma Configuration
-```sql
-PRAGMA journal_mode = WAL;
-PRAGMA synchronous = NORMAL;
-PRAGMA busy_timeout = 5000;
-PRAGMA temp_store = MEMORY;
-PRAGMA mmap_size = 268435456; /* 256MB memory-mapped I/O */
-PRAGMA cache_size = -32000;   /* 32MB page cache */
-```
-
-### Relational Schema
-```sql
-CREATE TABLE IF NOT EXISTS files (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    path TEXT UNIQUE NOT NULL,
-    git_oid TEXT NOT NULL,
-    loc INTEGER NOT NULL DEFAULT 0,
-    scanned_at INTEGER NOT NULL
-);
-
-CREATE TABLE IF NOT EXISTS symbols (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    file_id INTEGER NOT NULL REFERENCES files(id) ON DELETE CASCADE,
-    name TEXT NOT NULL,
-    kind TEXT NOT NULL,
-    signature TEXT NOT NULL,
-    start_line INTEGER NOT NULL,
-    end_line INTEGER NOT NULL
-);
-
-CREATE TABLE IF NOT EXISTS edges (
-    source_id INTEGER NOT NULL REFERENCES symbols(id) ON DELETE CASCADE,
-    target_id INTEGER NOT NULL REFERENCES symbols(id) ON DELETE CASCADE,
-    kind TEXT NOT NULL,
-    weight REAL NOT NULL DEFAULT 1.0,
-    PRIMARY KEY (source_id, target_id, kind)
-) WITHOUT ROWID;
-
-CREATE INDEX IF NOT EXISTS idx_edges_incoming_covering 
-ON edges (target_id, kind, source_id);
-```
-
-The `edges` table uses `WITHOUT ROWID` to eliminate the secondary B-Tree lookup overhead. The `idx_edges_incoming_covering` index resolves reverse dependency and call graph traversals directly from the index tree.
+The current schema includes generation-qualified `generation_files`, `generation_symbols`, and `generation_edges`; inventory and evidence projections use `inventory_files`, `facts`, `evidence`, and `relations`. `generation_fts` is updated in the same publication transaction. Legacy mutable tables may remain for migration diagnostics, but they are not a source for a verified current snapshot. A schema migration must reject a newer `user_version` before changing the database.
 
 ---
 
-## Polyglot AST Engine & Top 20 TIOBE Parsing
+## Polyglot AST Engine & Heuristic Language Support
 
 AutoDoc employs a tiered static parsing architecture:
-1. **Tier 1 (Tree-Sitter Concrete Syntax Trees)**: High-traffic languages (TypeScript, JavaScript, Python, Rust, Go, Java, C/C++) compile tree-sitter grammars directly in the Rust core, extracting exact function definitions, method boundaries, parameter types, return signatures, and docstrings.
-2. **Tier 2/3 (Deterministic Regex Heuristics)**: Languages such as SQL (tables, views, procedures), C#, PHP, Ruby, Kotlin, Swift, R, Fortran, Delphi, MATLAB, Perl, Visual Basic, and Bash use precompiled regex heuristics to extract symbol contracts without requiring dozens of external native libraries.
+1. **Tree-sitter extraction**: TypeScript/JavaScript, Python, Rust, Go, Java, and C have AST-backed symbol/call extraction. Confirmed calls require supported syntax, an unambiguous same-file declaration, and no detected shadowing binding. Receiver dispatch, imports, overload resolution, and complete lexical scopes remain unsupported or ambiguous where the parser cannot prove a target.
+2. **Heuristic extraction**: Other language analyzers and fallback patterns are candidates with limited coverage. They do not become confirmed call relations solely because a name matches. Diagnostics and coverage states expose unsupported or partial analysis.
 3. **Cyclomatic Complexity**: Measures control flow branching complexity ($CC = 1 + \text{decision points}$) by scanning `if`, `for`, `while`, `catch`, `&&`, `||`, `match`, and `case` tokens, weighting key components in C4 Level 3 diagrams.
 
 ---
 
 ## Dynamic C4 Synthesis & Realtime Contract Discovery
 
-- **Level 1 (System Context)**: Discovers system boundary, actors, external identity providers, and remote database nodes.
-- **Level 2 (Containers)**: Identifies web clients, API gateways, worker pools, and persistence engines by inspecting `package.json` dependencies and source manifests.
-- **Level 3 (Components)**: Synthesizes internal component nodes directly from SQLite `symbols` and `edges`, rendering real internal call relationships with sanitized identifiers and WCAG 2.1 AA visual contrast.
-- **Realtime Protocols**: The `RealtimeAnalyzer` inspects Socket.io typed interfaces (`ClientToServerEvents`, `ServerToClientEvents`), imperative socket emissions (`socket.on`, `socket.emit`), and WebRTC signaling contracts (`webrtc:offer`, `webrtc:answer`, `webrtc:candidate`).
+- **Level 1 (Repository Context)**: Identifies the analyzed repository boundary; external actors and services are not inferred without supporting facts.
+- **Level 2 (Infrastructure Inventory)**: Projects declared workspace packages, internal dependencies, and detected container services from the selected snapshot. Missing evidence is partial or unsupported coverage.
+- **Level 3 (Repository Structure)**: Shows inventoried files and module relationships; it does not claim responsibility-level components when facts are unavailable.
+- **Level 4 (Code)**: Projects indexed symbols and resolved call relations from one scan generation. Unresolved calls remain candidates, not confirmed edges.
+- **Realtime Contracts**: The `RealtimeAnalyzer` reports discovered events and payload types from snapshot source. Heuristic discoveries remain subject to the response coverage and diagnostics.
 
 ---
 
 ## Living Diátaxis Documentation Generation
 
-The `DiataxisGenerator` synthesizes living documentation directly from the SQLite graph, partitioned into the four Diátaxis quadrants:
-- **Tutorials**: Onboarding and quickstart walkthroughs.
-- **How-To Guides**: Step-by-step guides for adding modules and endpoints.
-- **Reference**: Automated inventories of HTTP REST endpoints, WebSocket/WebRTC events, and data models.
-- **Architecture (Explanation)**: System context, container topology, and the honesty quirks report.
+The MCP export handler fixes one repository snapshot for the `DiataxisGenerator`. Current output includes architecture/explanation reports and maps, reference catalogs for endpoints, socket events and data models, and a getting-started tutorial when a package manager is detected. The generator does not currently emit How-To guides.
 
 ## Optional Local LLM Enrichment Layer
 
 When a local GGUF model is configured (see [ADR-006](../decisions/adr-006-local-llm-enrichment.md)), an enrichment layer augments — never replaces — the deterministic pipeline:
 
 1. **Model resolution** (`src/llm/`): operator override > hardware auto-selection (largest profile fitting min(free VRAM, free RAM), 15% margin) > deterministic fallback.
-2. **Two-pass hybrid detection**: regex/AST pass-1 remains the source of truth; only ambiguous candidates (e.g. routes without a resolved mount prefix) go to LLM pass-2 classification.
+2. **Two-pass advisory review**: static pass-1 results remain the source of truth; ambiguous candidates (e.g. routes without a resolved mount prefix) may receive LLM annotations, without removing static candidates or relations.
 3. **Structured output**: schema-constrained JSON generation with Zod validation and one repair retry; unparseable output is never accepted.
 4. **Anti-hallucination boundary**: LLM output is restricted to descriptions, summaries and refinements validated against static evidence; paths, parameters, schemas and $refs always come from deterministic analysis.
-5. **Fallback guarantee**: LLM unavailability or timeout degrades every tool to identical regex-only behavior (`llmEnriched: false`).
+5. **Fallback guarantee**: LLM unavailability or timeout preserves the deterministic output for the affected tool (`llmEnriched: false`).
 

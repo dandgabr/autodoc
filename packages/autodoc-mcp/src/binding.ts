@@ -2,6 +2,7 @@ import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { createRequire } from "node:module";
 import { existsSync } from "node:fs";
+import type { SnapshotPage } from "./analysis/contracts.js";
 
 const require = createRequire(import.meta.url);
 const __filename = fileURLToPath(import.meta.url);
@@ -16,12 +17,27 @@ export interface PingResponse {
 }
 
 export interface NativeScanResult {
+  scanId?: string;
+  activeScanId?: string | null;
   totalFiles: number;
+  candidateFiles: number;
+  filesWithErrors: number;
   totalLoc: number;
   totalSymbols?: number;
   totalEdges?: number;
   languages: string[];
   cachePath: string;
+  analysisState: "complete" | "partial" | "failed";
+  coverageState?: "complete" | "partial";
+  diagnostics: Array<{ stage: string; code: string; path?: string; message: string }>;
+}
+
+/** Optional scan resource budgets; omitted values use the native safe defaults. */
+export interface NativeScanOptions {
+  maxSourceBytes?: number;
+  workers?: number;
+  queueCapacity?: number;
+  batchSize?: number;
 }
 
 export interface NativeBinding {
@@ -30,7 +46,13 @@ export interface NativeBinding {
   triggerPanicTest(reason: string): string;
   sanitizeContent?(content: string): { sanitizedText: string; redactionCount: number };
   wrapUntrusted?(content: string, origin: string, file: string, symbol: string): string;
-  scanRepositoryNative?(repoPath: string): NativeScanResult;
+  scanRepositoryNative?(repoPath: string, options?: NativeScanOptions): NativeScanResult;
+  readRepositorySnapshotNative?(repoPath: string, scanId?: string): string;
+  readSnapshotPageNative?(repoPath: string, scanId: string, collection: SnapshotPage["collection"], cursor: string | null, limit: number): string;
+  readVerifiedSourceNative?(repoPath: string, relativePath: string, expectedSha256: string): Uint8Array;
+  /** Acquires a lock for the directory identity resolved by this path (normally /proc/self/fd/N). */
+  acquireExportLockNative(directoryPath: string): string;
+  releaseExportLockNative(token: string): void;
 }
 
 /**

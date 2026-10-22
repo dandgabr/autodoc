@@ -1,7 +1,6 @@
 import { RealtimeAnalyzer } from "../realtime/index.js";
-import { join } from "node:path";
-import { existsSync } from "node:fs";
-import { DatabaseSync } from "node:sqlite";
+import type { SnapshotContext } from "../../analysis/snapshot.js";
+import type { Evidence, Fact, Relation, SnapshotPage } from "../../analysis/contracts.js";
 
 export interface DeadCodeItem {
   name: string;
@@ -15,6 +14,10 @@ export interface HonestyReport {
   timestamp: string;
   repositoryPath: string;
   totalDeadCodeCount: number;
+  candidateCount: number;
+  coverage: "complete" | "partial" | "not_scanned" | "unsupported";
+  scanId?: string;
+  diagnostics: string[];
   deadDeclaredEvents: DeadCodeItem[];
   undeclaredEvents: DeadCodeItem[];
   orphanSymbols: DeadCodeItem[];
@@ -23,11 +26,30 @@ export interface HonestyReport {
 
 export class HonestyAnalyzer {
   private repoPath: string;
+  private snapshot?: SnapshotContext;
   private realtimeAnalyzer: RealtimeAnalyzer;
 
-  constructor(repoPath: string = process.cwd()) {
+  constructor(repoPath: string = process.cwd(), snapshot?: SnapshotContext) {
     this.repoPath = repoPath;
-    this.realtimeAnalyzer = new RealtimeAnalyzer(repoPath);
+    this.snapshot = snapshot;
+    this.realtimeAnalyzer = new RealtimeAnalyzer(repoPath, { snapshot });
+  }
+
+  private readSnapshotCollection(context: SnapshotContext, collection: SnapshotPage["collection"]): Array<Fact | Evidence | Relation> {
+    const items: Array<Fact | Evidence | Relation> = [];
+    let cursor: string | null = null;
+    const visited = new Set<string>();
+    do {
+      const page = context.readPage(collection, cursor, 500);
+      if (page.scanId !== context.scanId || page.repositoryRoot !== context.repositoryRoot || page.collection !== collection) {
+        throw new Error(`${collection} page does not belong to the pinned snapshot`);
+      }
+      items.push(...page.items as Array<Fact | Evidence | Relation>);
+      cursor = page.nextCursor;
+      if (cursor && visited.has(cursor)) throw new Error(`${collection} pagination returned a repeated cursor`);
+      if (cursor) visited.add(cursor);
+    } while (cursor);
+    return items;
   }
 
   public generateHonestyReport(): HonestyReport {
@@ -37,7 +59,7 @@ export class HonestyAnalyzer {
     const quirks: string[] = [];
 
     // 1. Analyze Socket Contracts vs. Actual Emits & Listens
-    const allSocketEvents = this.realtimeAnalyzer.discoverSocketContracts("ALL", 200);
+    const allSocketEvents = this.realtimeAnalyzer.discoverSocketContracts("ALL", Number.MAX_SAFE_INTEGER);
     const typedEvents = allSocketEvents.filter((e) => e.isTypedContract);
     const imperativeEvents = allSocketEvents.filter((e) => !e.isTypedContract);
 
@@ -88,33 +110,29 @@ export class HonestyAnalyzer {
       }
     }
 
-    // 2. Query SQLite edges for orphan symbols (in-degree = 0)
-    const dbPath = join(this.repoPath, ".autodoc", "cache.db");
-    if (existsSync(dbPath)) {
-      try {
-        const db = new DatabaseSync(dbPath, { readOnly: true });
-        const stmt = db.prepare(`
-          SELECT s.name, s.kind, s.fqsn, f.path
-          FROM symbols s
-          JOIN files f ON s.file_id = f.file_id
-          WHERE s.kind IN ('function', 'method')
-            AND s.symbol_id NOT IN (SELECT DISTINCT callee_id FROM edges)
-            AND s.name NOT IN ('main', 'start', 'init', 'index', 'run', 'handler')
-          LIMIT 15
-        `);
-        const rows = stmt.all() as Array<{ name: string; kind: string; fqsn: string; path: string }>;
-        for (const r of rows) {
-          orphanSymbols.push({
-            name: r.name,
-            type: "ORPHAN_SYMBOL",
-            sourceFile: r.path,
-            reason: `Symbol has zero incoming call-graph edges (in-degree = 0) from active codebase.`,
-          });
-        }
-        db.close();
-      } catch {
-        // SQLite query fallback
+    const diagnostics: string[] = [];
+    if (this.snapshot) {
+      const facts = this.readSnapshotCollection(this.snapshot, "facts") as Fact[];
+      const evidence = this.readSnapshotCollection(this.snapshot, "evidence") as Evidence[];
+      const relations = this.readSnapshotCollection(this.snapshot, "relations") as Relation[];
+      const evidenceIds = new Set(evidence.map((item) => item.id));
+      const incoming = new Set(relations.filter((relation) => relation.resolution === "resolved" && relation.toId &&
+        relation.evidenceIds.length > 0 && relation.evidenceIds.every((id) => evidenceIds.has(id))).map((relation) => relation.toId!));
+      for (const fact of facts) {
+        if (!/^(function|method)$/i.test(fact.kind) || fact.evidenceIds.length === 0 || !fact.evidenceIds.every((id) => evidenceIds.has(id)) || incoming.has(fact.id)) continue;
+        const name = typeof fact.attributes.name === "string" ? fact.attributes.name : fact.id;
+        const sourceFile = typeof fact.attributes.path === "string" ? fact.attributes.path : evidence.find((item) => fact.evidenceIds.includes(item.id))?.path ?? "unknown";
+        if (["main", "start", "init", "index", "run", "handler"].includes(name.toLowerCase())) continue;
+        orphanSymbols.push({
+          name,
+          type: "ORPHAN_SYMBOL",
+          sourceFile,
+          reason: "No evidence-backed incoming call relation was found in this scan; exports, callbacks, dynamic dispatch, or incomplete coverage may explain this candidate.",
+        });
       }
+      if (facts.length === 0) diagnostics.push("The snapshot does not persist symbol facts; orphan-symbol analysis is unsupported for this scan.");
+    } else {
+      diagnostics.push("No pinned scan snapshot was supplied; symbol candidates are not read from mutable cache rows.");
     }
 
     if (deadDeclaredEvents.length > 0) {
@@ -131,6 +149,10 @@ export class HonestyAnalyzer {
       timestamp: new Date().toISOString(),
       repositoryPath: this.repoPath,
       totalDeadCodeCount: deadDeclaredEvents.length + undeclaredEvents.length + orphanSymbols.length,
+      candidateCount: deadDeclaredEvents.length + undeclaredEvents.length + orphanSymbols.length,
+      coverage: this.snapshot ? "partial" : "not_scanned",
+      ...(this.snapshot ? { scanId: this.snapshot.scanId } : {}),
+      diagnostics,
       deadDeclaredEvents,
       undeclaredEvents,
       orphanSymbols,

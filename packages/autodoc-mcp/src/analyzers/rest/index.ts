@@ -1,9 +1,13 @@
 import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
-import { join, extname, basename, dirname } from "node:path";
+import { createHash } from "node:crypto";
+import { join, extname, basename, dirname, relative } from "node:path";
 import { isIgnoredDirectory, isTestPath } from "../utils.js";
 import { LlmCandidateFilter, type EnrichmentReport } from "../llm-candidate-filter.js";
+import type { SnapshotContext } from "../../analysis/snapshot.js";
+import { readInventoryFiles, readVerifiedSource, StaleSourceError } from "../../analysis/source-reader.js";
 
 export interface DiscoveredEndpoint {
+  id?: string;
   endpoint: string;
   method: string;
   protocol: "REST" | "SOAP" | "GRPC" | "GRAPHQL" | "CORBA";
@@ -15,6 +19,7 @@ export interface DiscoveredEndpoint {
 
 export interface RestAnalyzerOptions {
   includeTests?: boolean;
+  snapshot?: SnapshotContext;
   /** Enable pass-2 LLM validation of ambiguous candidates (default off). */
   llmEnrichment?: boolean;
 }
@@ -23,10 +28,11 @@ export class RestAnalyzer {
   private repoPath: string;
   private includeTests: boolean;
   private llmEnrichment: boolean;
-  /** Endpoint list retained so pass-2 LLM validation can prune it. */
+  private snapshot?: SnapshotContext;
+  /** Endpoint list retained as pass-1 catalog facts. */
   private lastEndpoints: DiscoveredEndpoint[] = [];
   /** Ambiguous pass-1 candidates staged for optional LLM validation. */
-  public pendingLlmCandidates: Array<{ index: number; label: string; context: string }> = [];
+  public pendingLlmCandidates: Array<{ id: string; index: number; label: string; context: string }> = [];
   public lastEnrichmentReport: EnrichmentReport = {
     llmEnriched: false,
     candidatesReviewed: 0,
@@ -35,9 +41,7 @@ export class RestAnalyzer {
   };
 
   /**
-   * Pass-2 LLM validation of ambiguous candidates. Prunes rejected
-   * endpoints from the last discovery result and returns the pruned list
-   * (no re-scan required). Safe no-op without staged candidates.
+   * Pass-2 LLM validation is advisory: verdicts never remove catalog facts.
    */
   public async applyLlmValidation(): Promise<EnrichmentReport & { endpoints: DiscoveredEndpoint[] }> {
     if (!this.llmEnrichment || this.pendingLlmCandidates.length === 0) {
@@ -46,37 +50,23 @@ export class RestAnalyzer {
     const filter = new LlmCandidateFilter(true);
     const { verdicts, report } = await filter.validateCandidates(this.pendingLlmCandidates);
     this.lastEnrichmentReport = report;
-    const rejected = new Set<number>();
-    verdicts.forEach((v, i) => {
-      if (!v.accepted) rejected.add(this.pendingLlmCandidates[i].index);
-    });
-
-    // Trust guard: the LLM sees untrusted repository code and can be steered
-    // by prompt injection to suppress genuine endpoints. If it rejects more
-    // than 30% of candidates, keep pass-1 results untouched (advisory mode).
-    const rejectionRatio = verdicts.length > 0 ? rejected.size / verdicts.length : 0;
-    if (rejectionRatio > 0.3) {
-      this.pendingLlmCandidates = [];
-      return {
-        ...report,
-        candidatesRejected: 0,
-        advisory: `LLM rejected ${(rejectionRatio * 100).toFixed(0)}% of candidates (>30% cap) — pass-1 results kept.`,
-        endpoints: this.lastEndpoints,
-      };
-    }
-
-    this.lastEndpoints = this.lastEndpoints.filter((_, i) => !rejected.has(i));
     this.pendingLlmCandidates = [];
-    return { ...report, endpoints: this.lastEndpoints };
+    return { ...report, advisory: report.advisory ?? "LLM verdicts are observations and do not alter endpoint facts.", endpoints: this.lastEndpoints };
   }
 
   constructor(repoPath: string = process.cwd(), options: RestAnalyzerOptions = {}) {
     this.repoPath = repoPath;
     this.includeTests = options.includeTests ?? false;
     this.llmEnrichment = options.llmEnrichment ?? false;
+    this.snapshot = options.snapshot;
   }
 
-  public discoverEndpoints(filterProtocol: string = "ALL", limit: number = 200, includeTests?: boolean): DiscoveredEndpoint[] {
+  private readText(filePath: string): string {
+    if (this.snapshot) return readVerifiedSource(this.snapshot, relative(this.snapshot.repositoryRoot, filePath).split("\\").join("/")).toString("utf8");
+    return readFileSync(filePath, "utf-8");
+  }
+
+  public discoverEndpoints(filterProtocol: string = "ALL", limit: number = Number.MAX_SAFE_INTEGER, includeTests?: boolean): DiscoveredEndpoint[] {
     const endpoints: DiscoveredEndpoint[] = [];
     const effectiveIncludeTests = includeTests ?? this.includeTests;
     const sourceFiles = this.findSourceFiles(this.repoPath, 0, effectiveIncludeTests);
@@ -86,10 +76,10 @@ export class RestAnalyzer {
 
     // Pass 2: Extract endpoints from each file with mounted prefixes
     const seen = new Set<string>();
-    const ambiguous: Array<{ index: number; label: string; context: string }> = [];
+    const ambiguous: Array<{ id: string; index: number; label: string; context: string }> = [];
 
     for (const file of sourceFiles) {
-      const content = readFileSync(file, "utf-8");
+      const content = this.readText(file);
       const ext = extname(file);
       const relPath = this.toRelative(file);
 
@@ -123,13 +113,15 @@ export class RestAnalyzer {
           // Heuristic ambiguity signal: no mount prefix resolved (route may
           // be mislocated) — these are the pass-2 LLM candidates.
           if (this.llmEnrichment && candidatePrefixes.length === 0) {
+            const id = this.endpointId(ep, relPath);
             ambiguous.push({
+              id,
               index: endpoints.length,
               label: `${ep.method} ${ep.endpoint}`,
               context: content.slice(Math.max(0, content.indexOf(ep.endpoint) - 300), content.indexOf(ep.endpoint) + 500),
             });
           }
-          endpoints.push({ ...ep, confidence: "regex" });
+          endpoints.push({ ...ep, id: this.endpointId(ep, relPath), confidence: "regex" });
         }
       }
     }
@@ -147,6 +139,11 @@ export class RestAnalyzer {
     result = result.slice(0, limit);
     this.lastEndpoints = result;
     return result;
+  }
+
+  private endpointId(endpoint: Pick<DiscoveredEndpoint, "method" | "endpoint">, sourceFile: string): string {
+    const digest = createHash("sha256").update(`${endpoint.method.toUpperCase()}\0${endpoint.endpoint}\0${sourceFile}`).digest("hex");
+    return `endpoint:${digest.slice(0, 24)}`;
   }
 
   private buildMountTable(sourceFiles: string[]) {
@@ -172,8 +169,9 @@ export class RestAnalyzer {
 
       let content = "";
       try {
-        content = readFileSync(file, "utf-8");
-      } catch {
+        content = this.readText(file);
+      } catch (error) {
+        if (error instanceof StaleSourceError) throw error;
         continue;
       }
 
@@ -560,6 +558,11 @@ export class RestAnalyzer {
   }
 
   private findSourceFiles(dir: string, depth: number = 0, includeTests: boolean = this.includeTests): string[] {
+    if (this.snapshot) return readInventoryFiles(this.snapshot)
+      .filter((file) => file.category === "source" && file.contentSha256 && !file.readError && !file.excludedReason)
+      .filter((file) => includeTests || !isTestPath(file.path))
+      .filter((file) => matchesSourceExt(extname(file.path)))
+      .map((file) => join(this.snapshot!.repositoryRoot, file.path));
     if (depth > 15) return [];
     const files: string[] = [];
 
@@ -584,7 +587,8 @@ export class RestAnalyzer {
           }
         }
       }
-    } catch {
+    } catch (error) {
+        if (error instanceof StaleSourceError) throw error;
       // Skip unreadable files
     }
 

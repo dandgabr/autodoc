@@ -1,0 +1,100 @@
+{
+  "profile": "mixed",
+  "capabilities": [
+    "static-site",
+    "javascript-source",
+    "python-source",
+    "rest-heuristic"
+  ],
+  "symbols": [
+    {
+      "id": "main.py::cli",
+      "kind": "function",
+      "name": "cli",
+      "path": "main.py",
+      "lineStart": 1,
+      "lineEnd": 2,
+      "visibility": "public",
+      "signature": "def cli():"
+    }
+  ],
+  "inventory": [
+    {
+      "path": "app.js",
+      "category": "source",
+      "support": "ast",
+      "contentSha256": "87c048225801b54d162a0a62e14b6d09365a8b3824dac61a57b82bbc9f76802a"
+    },
+    {
+      "path": "index.html",
+      "category": "markup",
+      "support": "heuristic",
+      "contentSha256": "75cc2e69b4d5bcd10f36e1b08741d27b9f3574c6f34483e775c99943620a8128"
+    },
+    {
+      "path": "main.py",
+      "category": "source",
+      "support": "ast",
+      "contentSha256": "f09d93e91d87e1833c9e744b8111e7f2a94056660d92e0d74c7cd93787c0a1ac"
+    }
+  ],
+  "facts": [],
+  "evidence": [],
+  "relations": [],
+  "endpoints": [
+    {
+      "method": "GET",
+      "path": "/health",
+      "source": "app.js",
+      "state": "partial",
+      "extractor": "heuristic"
+    }
+  ],
+  "unsupportedRelations": [
+    {
+      "kind": "loads-script",
+      "from": "index.html",
+      "to": "app.js",
+      "diagnostic": "No persisted semantic Relation or Evidence row exists for markup references."
+    }
+  ],
+  "coverage": {
+    "scan": {
+      "state": "complete",
+      "diagnostics": []
+    },
+    "symbols": {
+      "state": "complete"
+    },
+    "endpoints": {
+      "state": "partial",
+      "diagnostic": "Endpoint output has no persisted evidence row in the active snapshot."
+    },
+    "facts": {
+      "state": "unsupported",
+      "diagnostic": "Native scan does not emit semantic Fact rows yet.",
+      "diagnosticCode": "FACT_EXTRACTION_UNAVAILABLE"
+    },
+    "evidence": {
+      "state": "partial",
+      "diagnostic": "Native scan emits callsite evidence only.",
+      "diagnosticCode": "CALLSITE_EVIDENCE_ONLY"
+    },
+    "relations": {
+      "state": "partial",
+      "diagnostic": "Native scan emits call relations only.",
+      "diagnosticCode": "CALL_RELATIONS_ONLY"
+    },
+    "schema": {
+      "state": "unsupported",
+      "diagnostic": "Native scan does not emit schema facts yet.",
+      "diagnosticCode": "SCHEMA_FACT_EXTRACTION_UNAVAILABLE"
+    },
+    "diagrams": {
+      "state": "complete",
+      "diagnostic": "Generated Mermaid blocks parse and match the expected per-profile count; visual contrast and clipping are not measured."
+    }
+  },
+  "schemas": [],
+  "diagramCount": 2
+}

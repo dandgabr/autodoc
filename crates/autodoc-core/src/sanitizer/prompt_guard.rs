@@ -5,7 +5,10 @@
 pub fn wrap_untrusted_code(content: &str, origin: &str, file: &str, symbol: &str) -> String {
     // 1. Escape any premature closing tags that an adversary might inject
     let escaped = content
-        .replace("</untrusted_code_context>", "&lt;/untrusted_code_context&gt;")
+        .replace(
+            "</untrusted_code_context>",
+            "&lt;/untrusted_code_context&gt;",
+        )
         .replace("<untrusted_code_context", "&lt;untrusted_code_context")
         // 2. Neutralize model special control tokens
         .replace("<|im_start|>", "[NEUTRALIZED_TOKEN_IM_START]")

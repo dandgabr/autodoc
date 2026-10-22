@@ -1,5 +1,5 @@
-use regex::Regex;
 use crate::sanitizer::entropy::{correlation_hash, shannon_entropy};
+use regex::Regex;
 
 pub struct SecretPattern {
     pub name: String,
@@ -20,7 +20,9 @@ impl Default for SecretScanner {
 
 impl SecretScanner {
     pub fn new() -> Self {
-        let mut scanner = Self { patterns: Vec::new() };
+        let mut scanner = Self {
+            patterns: Vec::new(),
+        };
         scanner.register_defaults();
         scanner
     }
@@ -38,13 +40,28 @@ impl SecretScanner {
         );
 
         // OpenAI API Key
-        self.add_pattern("OpenAI_API_Key", r"\bsk-[a-zA-Z0-9]{48,}\b", 4.0, "OPENAI_KEY");
+        self.add_pattern(
+            "OpenAI_API_Key",
+            r"\bsk-[a-zA-Z0-9]{48,}\b",
+            4.0,
+            "OPENAI_KEY",
+        );
 
         // Anthropic API Key
-        self.add_pattern("Anthropic_API_Key", r"\bsk-ant-api03-[a-zA-Z0-9_\-]{80,}\b", 4.0, "ANTHROPIC_KEY");
+        self.add_pattern(
+            "Anthropic_API_Key",
+            r"\bsk-ant-api03-[a-zA-Z0-9_\-]{80,}\b",
+            4.0,
+            "ANTHROPIC_KEY",
+        );
 
         // GitHub Token (ghp_, gho_, etc.)
-        self.add_pattern("GitHub_Token", r"\bgh[pousr]-[A-Za-z0-9_]{36,}\b", 4.0, "GITHUB_TOKEN");
+        self.add_pattern(
+            "GitHub_Token",
+            r"\bgh[pousr]-[A-Za-z0-9_]{36,}\b",
+            4.0,
+            "GITHUB_TOKEN",
+        );
 
         // Generic Private Key Headers
         self.add_pattern(
@@ -87,32 +104,35 @@ impl SecretScanner {
         let mut output = input.to_string();
 
         for pat in &self.patterns {
-            output = pat.pattern.replace_all(&output, |caps: &regex::Captures| {
-                let secret_val = if caps.len() > 1 {
-                    caps.get(1).map(|m| m.as_str()).unwrap_or("")
-                } else {
-                    caps.get(0).map(|m| m.as_str()).unwrap_or("")
-                };
+            output = pat
+                .pattern
+                .replace_all(&output, |caps: &regex::Captures| {
+                    let secret_val = if caps.len() > 1 {
+                        caps.get(1).map(|m| m.as_str()).unwrap_or("")
+                    } else {
+                        caps.get(0).map(|m| m.as_str()).unwrap_or("")
+                    };
 
-                if pat.min_entropy > 0.0 {
-                    let entropy = shannon_entropy(secret_val);
-                    if entropy < pat.min_entropy {
-                        // Entropy is too low, likely placeholder or false positive
-                        return caps.get(0).map(|m| m.as_str()).unwrap_or("").to_string();
+                    if pat.min_entropy > 0.0 {
+                        let entropy = shannon_entropy(secret_val);
+                        if entropy < pat.min_entropy {
+                            // Entropy is too low, likely placeholder or false positive
+                            return caps.get(0).map(|m| m.as_str()).unwrap_or("").to_string();
+                        }
                     }
-                }
 
-                let hash = correlation_hash(secret_val);
-                let placeholder = format!("[REDACTED_{}:{}]", pat.label, hash);
+                    let hash = correlation_hash(secret_val);
+                    let placeholder = format!("[REDACTED_{}:{}]", pat.label, hash);
 
-                if caps.len() > 1 {
-                    // Replace only the captured secret portion within the matched string
-                    let full_match = caps.get(0).map(|m| m.as_str()).unwrap_or("");
-                    full_match.replace(secret_val, &placeholder)
-                } else {
-                    placeholder
-                }
-            }).to_string();
+                    if caps.len() > 1 {
+                        // Replace only the captured secret portion within the matched string
+                        let full_match = caps.get(0).map(|m| m.as_str()).unwrap_or("");
+                        full_match.replace(secret_val, &placeholder)
+                    } else {
+                        placeholder
+                    }
+                })
+                .to_string();
         }
 
         output
