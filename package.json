@@ -20,7 +20,7 @@
     "test": "npm run test --workspaces",
     "test:bridge": "npm run test -w @autodoc/mcp",
     "validate:diagrams": "node .agents/skills/diagram-ux-validator/scripts/validate-diagrams.mjs",
-    "check:licenses": "license-checker-rseidelsohn --excludePackages \"autodoc-monorepo@0.1.0\" --onlyAllow \"MIT;Apache-2.0;BSD-2-Clause;BSD-3-Clause;ISC;0BSD;CC0-1.0;Unlicense;Python-2.0;BlueOak-1.0.0;CC-BY-3.0\" --summary"
+    "check:licenses": "license-checker-rseidelsohn --excludePackages \"autodoc-monorepo@0.1.0\" --onlyAllow \"MIT;Apache-2.0;BSD-2-Clause;BSD-3-Clause;ISC;0BSD;CC0-1.0;Unlicense;Python-2.0;BlueOak-1.0.0;CC-BY-3.0;EPL-2.0\" --summary"
   },
   "devDependencies": {
     "@napi-rs/cli": "^3.0.0-alpha.72",
