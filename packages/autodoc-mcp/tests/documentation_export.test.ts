@@ -222,8 +222,15 @@ describe('documentation export ownership', () => {
     const corruptDatabase = 'preserve this corrupt lock database';
     writeFileSync(lockPath, corruptDatabase);
 
-    expect(() => native.acquireExportLockNative!(root)).toThrow(/integrity|corrupt/i);
-    expect(readFileSync(lockPath, 'utf8')).toBe(corruptDatabase);
+    try {
+      expect(() => native.acquireExportLockNative!(root)).toThrow(/integrity|corrupt/i);
+      expect(readFileSync(lockPath, 'utf8')).toBe(corruptDatabase);
+    } finally {
+      // The corrupt file is deliberately preserved during the assertion. Remove
+      // this test fixture afterward so a later temp directory that reuses the
+      // same device/inode does not inherit the unrelated corrupted lock DB.
+      rmSync(lockPath, { force: true });
+    }
   });
 
   it('serializes directory aliases by the same device and inode identity', () => {
